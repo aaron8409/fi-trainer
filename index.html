@@ -97,7 +97,7 @@ ul.l li{margin-bottom:7px}
 <!-- ============ SETUP ============ -->
 <section id="vSetup" class="wrap">
   <h1>F&amp;I FaceTime Trainer</h1>
-  <div class="muted">Practice presenting Ford Protect, face to face. Every customer is randomly built and never repeats.</div><div class="muted" style="font-size:12px">Version 9 · FaceTime or phone call</div><div class="muted" style="font-size:13px" id="metCount"></div>
+  <div class="muted">Practice presenting Ford Protect, face to face. Every customer is randomly built and never repeats.</div><div class="muted" style="font-size:12px">Version 12 · free unlimited on-device AI voice</div><div class="muted" style="font-size:13px" id="metCount"></div>
 
   <div class="card">
     <h2>Next customer</h2>
@@ -125,6 +125,11 @@ ul.l li{margin-bottom:7px}
       <div><label>Women's voice</label><div style="display:flex;gap:6px"><select id="voiceF"></select><button class="ghost" id="playF" style="flex:0 0 auto">▶︎</button></div></div>
     </div>
     <div id="voiceTip" style="font-size:13px;margin-top:8px"></div>
+    <div style="margin-top:12px"><label>Voice engine</label>
+      <select id="vEngine"><option value="device">Phone's built-in voices (free)</option><option value="kokoro">On-device AI voice: FREE + UNLIMITED (one-time ~90 MB download)</option><option value="puter">Puter: natural voices, FREE, no key (sign in once)</option><option value="azure">Microsoft Azure: natural, FREE 500k characters/month</option><option value="eleven">ElevenLabs: most human (free ~10 min/month)</option><option value="openai">OpenAI: very natural (about 1.5¢ per minute)</option></select></div>
+    <div id="vKeyRow" class="hidden" style="margin-top:8px"><label>Your API key (saved only on this device)</label>
+      <div style="display:flex;gap:6px"><input id="vKey" type="password" autocomplete="off" placeholder="Paste your key here"><input id="vRegion" placeholder="Region, e.g. eastus" style="max-width:150px" class="hidden"><button class="ghost" id="vTest" style="flex:0 0 auto">Test</button></div>
+      <div id="vKeyMsg" style="font-size:13px;margin-top:6px"></div></div>
   </div>
 
   <div class="card">
@@ -1426,7 +1431,135 @@ function phrases(s){
   return out;
 }
 
+/* ---- natural AI voices (ElevenLabs / OpenAI) ---- */
+let audioEl=null, cloudFailUntil=0;
+function getAudioEl(){ if(!audioEl){ audioEl=new Audio(); audioEl.playsInline=true; audioEl.setAttribute("playsinline",""); audioEl.preload="auto"; } return audioEl; }
+function vEngine(){ return load("fift_vengine","device"); }
+function vKey(e){ return load("fift_vkey_"+(e||vEngine()),""); }
+/* ---- Kokoro: natural AI voice that runs on this device (free, unlimited, offline after download) ---- */
+let kokoro=null, kokoroLoading=null;
+const KK_F=["af_heart","af_bella","af_nicole","af_sarah","af_jessica","af_river"], KK_M=["am_michael","am_fenrir","am_puck","am_eric","am_liam","am_adam"];
+function loadKokoro(onProgress){
+  if(kokoro) return Promise.resolve(kokoro);
+  if(kokoroLoading) return kokoroLoading;
+  kokoroLoading=(async()=>{
+    const mod=await import("https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/+esm");
+    const useGpu=!IS_IOS && !!navigator.gpu;
+    const files={}; 
+    kokoro=await mod.KokoroTTS.from_pretrained("onnx-community/Kokoro-82M-v1.0-ONNX",{dtype:useGpu?"fp32":"q8",device:useGpu?"webgpu":"wasm",
+      progress_callback:(pr)=>{ if(pr&&pr.file&&pr.total){ files[pr.file]=[pr.loaded||0,pr.total]; let l=0,t=0; Object.values(files).forEach(([a,b])=>{l+=a;t+=b}); onProgress&&onProgress(Math.round(l/t*100)); } }});
+    return kokoro;
+  })();
+  kokoroLoading.catch(()=>{kokoroLoading=null;});
+  return kokoroLoading;
+}
+async function kokoroBlob(text,voice){
+  const tts=await loadKokoro();
+  const audio=await tts.generate(text,{voice,speed:(C&&C.speechRate)||1});
+  const wav=audio.toWav?audio.toWav():null;
+  return wav?new Blob([wav],{type:"audio/wav"}):audio.toBlob();
+}
+function sayKokoro(text){
+  return new Promise(async(res,rej)=>{
+    stopListening(); try{speechSynthesis.cancel()}catch(e){}
+    const voice=(()=>{ if(C._kv) return C._kv; const l=C.gender==="f"?KK_F:KK_M; C._kv=l[Math.floor((C.voiceSeed||Math.random())*l.length)]; return C._kv; })();
+    const parts=phrases(text); let i=0, finished=false, next=null;
+    const done=()=>{ if(finished)return; finished=true; speaking=false; SPK.text=""; setTurn(); res(); if(G.status==="live") setTimeout(startListening,IS_IOS?400:250); };
+    const make=(k)=>k<parts.length?kokoroBlob(parts[k],voice):Promise.resolve(null);
+    try{ next=make(0); await next; }catch(e){ rej(e); return; }
+    G.busy=G.busy; speaking=true; setTurn();
+    const a=getAudioEl();
+    const playNext=async()=>{
+      if(finished) return;
+      let blob; try{ blob=await next; }catch(e){ done(); return; }
+      if(!blob){ done(); return; }
+      const cur=parts[i]; i++; next=make(i);           // start making the next phrase while this one plays
+      const url=URL.createObjectURL(blob);
+      SPK.text=cur; SPK.hadBoundary=false; SPK.charMs=65;
+      a.onloadedmetadata=()=>{ if(isFinite(a.duration)&&a.duration>0) SPK.charMs=a.duration*1000/Math.max(1,cur.length); };
+      a.onplaying=()=>{ speaking=true; SPK.start=performance.now(); setTurn(); };
+      a.onended=()=>{ URL.revokeObjectURL(url); setTimeout(playNext,80); };
+      a.onerror=()=>{ URL.revokeObjectURL(url); setTimeout(playNext,10); };
+      a.src=url; try{ await a.play(); }catch(e){ done(); }
+    };
+    playNext();
+  });
+}
+function cloudVoiceOn(){ const e=vEngine(); return e!=="device" && (e==="puter" || !!vKey(e)) && Date.now()>cloudFailUntil; }
+const AZ_M=["en-US-AndrewMultilingualNeural","en-US-BrianMultilingualNeural","en-US-DavisNeural","en-US-GuyNeural","en-US-TonyNeural","en-US-ChristopherNeural"], AZ_F=["en-US-AvaMultilingualNeural","en-US-EmmaMultilingualNeural","en-US-JennyNeural","en-US-AriaNeural","en-US-SaraNeural","en-US-NancyNeural"];
+let puterLoading=null;
+function loadPuter(){ if(window.puter) return Promise.resolve(); if(puterLoading) return puterLoading;
+  puterLoading=new Promise((res,rej)=>{ const sc=document.createElement("script"); sc.src="https://js.puter.com/v2/"; sc.onload=()=>res(); sc.onerror=()=>{puterLoading=null;rej(new Error("Puter didn't load (needs internet)"))}; document.head.appendChild(sc); });
+  return puterLoading; }
+const xmlEsc=t=>String(t).replace(/[<>&'"]/g,c=>({"<":"&lt;",">":"&gt;","&":"&amp;","'":"&apos;",'"':"&quot;"}[c]));
+const OAI_M=["ash","echo","onyx","ballad","verse"], OAI_F=["coral","nova","shimmer","sage"];
+function pickCloudVoice(){
+  if(C._cv) return C._cv;
+  const g=C.gender==="f"?"f":"m", seed=C.voiceSeed||Math.random();
+  if(vEngine()==="openai"||vEngine()==="puter"){ const l=g==="f"?OAI_F:OAI_M; C._cv=l[Math.floor(seed*l.length)]; return C._cv; }
+  if(vEngine()==="azure"){ const l=g==="f"?AZ_F:AZ_M; C._cv=l[Math.floor(seed*l.length)]; return C._cv; }
+  const list=load("fift_el_voices",[]).filter(v=>v.g===g);
+  const ageWant=C.age>58?"old":C.age<32?"young":"middle";
+  const pref=list.filter(v=>v.a===ageWant), pool=pref.length?pref:list;
+  C._cv = pool.length ? pool[Math.floor(seed*pool.length)].id : (g==="f"?"21m00Tcm4TlvDq8ikWAM":"pNInz6obpgDQGcFmaJgB");
+  return C._cv;
+}
+async function cloudAudio(text){
+  const e=vEngine(), key=vKey(e), voice=pickCloudVoice();
+  if(e==="puter"){
+    if(!window.puter) await loadPuter();
+    let a;
+    try{ a=await puter.ai.txt2speech(text,{provider:"openai",model:"gpt-4o-mini-tts",voice,
+      instructions:`You are a ${C.age||40}-year-old car buyer in a dealership finance office. Personality: ${(C.persona&&C.persona.label)||"normal"}. Talk naturally like a real person in conversation.`}); }
+    catch(err){ a=await puter.ai.txt2speech(text,{voice:C.gender==="f"?"Danielle":"Matthew",engine:"generative",language:"en-US"}); }
+    if(!a||!a.src) throw new Error("Puter returned no audio");
+    return a.src;
+  }
+  if(e==="azure"){
+    const region=(load("fift_vregion","")||"eastus").trim();
+    const rate=C.speechRate&&C.speechRate!==1?Math.round((C.speechRate-1)*100):0;
+    const ssml=`<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'><voice name='${voice}'><prosody rate='${rate}%'>${xmlEsc(text)}</prosody></voice></speak>`;
+    const r=await fetch(`https://${region}.tts.speech.microsoft.com/cognitiveservices/v1`,{method:"POST",
+      headers:{"Ocp-Apim-Subscription-Key":key,"Content-Type":"application/ssml+xml","X-Microsoft-OutputFormat":"audio-24khz-48kbitrate-mono-mp3"},body:ssml});
+    if(!r.ok){ throw new Error("Azure "+r.status+(r.status===401?" (key or region wrong)":"")); }
+    return await r.blob();
+  }
+  if(e==="eleven"){
+    const r=await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voice}?output_format=mp3_44100_64`,{method:"POST",
+      headers:{"xi-api-key":key,"Content-Type":"application/json","Accept":"audio/mpeg"},
+      body:JSON.stringify({text,model_id:"eleven_flash_v2_5",voice_settings:{stability:.42,similarity_boost:.75,style:.25}})});
+    if(!r.ok){ const t=await r.text().catch(()=> ""); throw new Error("ElevenLabs "+r.status+" "+t.slice(0,120)); }
+    return await r.blob();
+  }
+  const body={model:"gpt-4o-mini-tts",voice,input:text,response_format:"mp3",
+    instructions:`You are ${C.first||"a customer"}, a ${C.age||40}-year-old car buyer sitting in a dealership finance office. Personality: ${(C.persona&&C.persona.label)||"normal"}. Talk naturally and casually like a real person in conversation, not an announcer.`};
+  let r=await fetch("https://api.openai.com/v1/audio/speech",{method:"POST",headers:{"Authorization":"Bearer "+key,"Content-Type":"application/json"},body:JSON.stringify(body)});
+  if(!r.ok && r.status!==401 && r.status!==429){ r=await fetch("https://api.openai.com/v1/audio/speech",{method:"POST",headers:{"Authorization":"Bearer "+key,"Content-Type":"application/json"},body:JSON.stringify({model:"tts-1",voice:(C.gender==="f"?"nova":"onyx"),input:text,response_format:"mp3"})}); }
+  if(!r.ok){ const t=await r.text().catch(()=> ""); throw new Error("OpenAI "+r.status+" "+t.slice(0,120)); }
+  return await r.blob();
+}
+function sayCloud(text){
+  return new Promise(async (res,rej)=>{
+    stopListening(); try{speechSynthesis.cancel()}catch(e){}
+    let blob; try{ blob=await cloudAudio(text); }catch(e){ rej(e); return; }
+    let finished=false; const done=()=>{ if(finished)return; finished=true; speaking=false; SPK.text=""; setTurn(); res(); if(G.status==="live") setTimeout(startListening,IS_IOS?400:250); };
+    const a=getAudioEl(), isBlob=(blob instanceof Blob), url=isBlob?URL.createObjectURL(blob):String(blob);
+    SPK.text=text; SPK.hadBoundary=false; SPK.charMs=65;
+    a.onloadedmetadata=()=>{ if(isFinite(a.duration)&&a.duration>0) SPK.charMs=a.duration*1000/Math.max(1,text.length); };
+    a.onplaying=()=>{ speaking=true; SPK.start=performance.now(); setTurn(); };
+    a.onended=()=>{ if(isBlob) URL.revokeObjectURL(url); done(); };
+    a.onerror=()=>{ done(); };
+    a.src=url;
+    try{ await a.play(); }catch(e){ done(); }
+    setTimeout(()=>{ if(!finished && a.paused && !speaking) done(); },20000);
+  });
+}
 function say(text){
+  if(vEngine()==="kokoro" && Date.now()>cloudFailUntil) return sayKokoro(text).catch(err=>{ cloudFailUntil=Date.now()+60000; try{hint("On-device voice failed ("+String(err&&err.message||err).slice(0,80)+"). Using the phone voice.");}catch(e){} return sayDevice(text); });
+  if(cloudVoiceOn()) return sayCloud(text).catch(err=>{ cloudFailUntil=Date.now()+60000; try{hint("AI voice failed ("+(err.message||err).slice(0,80)+"). Using the phone voice.");}catch(e){} return sayDevice(text); });
+  return sayDevice(text);
+}
+function sayDevice(text){
   return new Promise(res=>{
     if(!('speechSynthesis' in window)){res();return}
     stopListening();
@@ -1524,6 +1657,7 @@ function stopListening(){ if(rec&&listening){try{rec.stop()}catch(e){} listening
 function flushSpeech(){ const t=pending.trim(); pending=""; if(t) managerSays(t); }
 // iPad/iPhone only allow speech + mic after a tap: unlock both on the Start tap
 function unlockAudio(){
+  try{ const a=getAudioEl(); a.src="data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwLjE2LjEwMAAAAAAAAAAAAAAA//NwwAAAAAAAAAAAAEluZm8AAAAPAAAACAAAA/oAR0dHR0dHR0dHR0dHYmJiYmJiYmJiYmJifHx8fHx8fHx8fHx8fJaWlpaWlpaWlpaWlrGxsbGxsbGxsbGxsbHLy8vLy8vLy8vLy8vl5eXl5eXl5eXl5eXl////////////////AAAAAExhdmM2MC4zMQAAAAAAAAAAAAAAACQC1AAAAAAAAAP6yysejgAAAAAAAAAAAAAAAAD/80DEAAAAA0gAAAAATEFNRTMuMTAwVVVVVVVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zQsRbAAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zQMSkAAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVTEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//NCxKMAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVVTEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//NAxKQAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVMQU1FMy4xMDBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX/80LEowAAA0gAAAAAVVVVVVVVVVVVVVVVVVVVVVVVVVVMQU1FMy4xMDBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX/80DEpAAAA0gAAAAAVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zQsSjAAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVQ=="; a.volume=0; a.play().then(()=>{a.pause();a.volume=1;}).catch(()=>{a.volume=1;}); }catch(e){}
   try{ const u=new SpeechSynthesisUtterance(" "); u.volume=0; speechSynthesis.speak(u); }catch(e){}
   try{ setupRec(); if(rec){ rec.start(); setTimeout(()=>{try{rec.stop()}catch(e){}},300); } }catch(e){}
 }
@@ -1851,6 +1985,46 @@ fillVoicePickers();
 $("videoIn").onchange=e=>{ const f=[...e.target.files]; if(f.length) addVideos(f); e.target.value=""; };
 $("photoIn").onchange=e=>{ const f=[...e.target.files]; if(f.length) addPhotos(f); e.target.value=""; };
 $("clearPhotos").onclick=async()=>{ await idbClear(); photoStatus(); $("photoProg").textContent="Photos cleared."; };
+$("vEngine").value=load("fift_vengine","device");
+const vUI=()=>{ const e=$("vEngine").value; $("vKeyRow").classList.toggle("hidden",e==="device"); $("vKey").value=e==="device"?"":vKey(e);
+  $("vKey").classList.toggle("hidden",e==="puter"||e==="kokoro"); $("vRegion").classList.toggle("hidden",e!=="azure"); $("vRegion").value=load("fift_vregion","");
+  if(e==="puter") loadPuter().catch(()=>{});
+  $("vKeyMsg").innerHTML=e==="kokoro"?'No account, no key, no limits. Tap <b>Test</b> once on Wi-Fi to download the voice (about 90 MB, one time). After that it runs on this device, free and unlimited, even offline. Newer iPhones work best; it may be slow or fail on older phones.':e==="puter"?'No key needed. Tap <b>Test</b>. The first time, a Puter window opens: create a free account or sign in, then come back. Puter covers the voice cost from your free account allowance.':e==="azure"?'Free key: sign up at <b>portal.azure.com</b> › Create a resource › <b>Speech</b> › Pricing tier <b>Free F0</b>. Then open it › <b>Keys and Endpoint</b>: copy <b>KEY 1</b> and the <b>Location/Region</b> (like eastus). Paste both here and tap Test.':e==="eleven"?'Get a free key: sign up at <b>elevenlabs.io</b> › your profile › <b>API Keys</b> › Create. Paste it here and tap Test.':e==="openai"?'Get a key: <b>platform.openai.com</b> › API keys › Create (add $5 of credit; that covers about 300 minutes of customer speech). Paste it here and tap Test.':""; };
+$("vEngine").onchange=()=>{ store("fift_vengine",$("vEngine").value); vUI(); };
+$("vKey").onchange=()=>{ store("fift_vkey_"+$("vEngine").value,$("vKey").value.trim()); };
+$("vRegion").onchange=()=>{ store("fift_vregion",$("vRegion").value.trim().toLowerCase().replace(/\s+/g,"")); };
+$("vTest").onclick=async()=>{
+  const e=$("vEngine").value, k=$("vKey").value.trim(); if(e!=="puter") store("fift_vkey_"+e,k); const m=$("vKeyMsg");
+  if(e==="azure") store("fift_vregion",$("vRegion").value.trim().toLowerCase().replace(/\s+/g,""));
+  if(e==="kokoro"){
+    try{
+      m.textContent="Downloading the voice… 0%";
+      await loadKokoro(pct=>{ m.textContent="Downloading the voice… "+pct+"%"; });
+      m.textContent="Voice ready. Playing a sample…";
+      const saved=C; C={gender:"m",age:45,first:"Mike",personaKey:"friendly",persona:{label:"friendly"},voiceSeed:.1,speechRate:1}; G.status="preview";
+      await sayKokoro("Hey, how's it going? Honestly, I already told the salesman I don't need anything extra.");
+      C=saved; cloudFailUntil=0;
+      m.innerHTML='<span class="ok">✓ Works! Customers will now use the free on-device AI voice.</span>';
+    }catch(err){ m.innerHTML='<span class="bad">✗ Couldn\'t run the on-device voice here ('+esc(String(err&&err.message||err).slice(0,120))+'). This phone may not have enough memory. Try Puter or Azure instead.</span>'; }
+    return;
+  }
+  if(!k && e!=="puter"){ m.innerHTML='<span class="bad">Paste your key first.</span>'; return; }
+  m.textContent="Testing…";
+  try{
+    if(e==="eleven"){
+      const r=await fetch("https://api.elevenlabs.io/v1/voices",{headers:{"xi-api-key":k}});
+      if(!r.ok) throw new Error("ElevenLabs said "+r.status+(r.status===401?" (key not accepted)":""));
+      const j=await r.json(); const vs=(j.voices||[]).map(v=>({id:v.voice_id,name:v.name,g:/female|woman/i.test((v.labels&&v.labels.gender)||"")?"f":/male|man/i.test((v.labels&&v.labels.gender)||"")?"m":"?",a:(((v.labels&&v.labels.age)||"").match(/old|young|middle/i)||["middle"])[0].toLowerCase()})).filter(v=>v.g!=="?");
+      store("fift_el_voices",vs);
+    }
+    const saved=C; C={gender:"m",age:45,first:"Mike",personaKey:"friendly",persona:{label:"friendly"},voiceSeed:Math.random()}; G.status="preview";
+    await sayCloud("Hey, how's it going? Honestly, I already told the salesman I don't need anything extra.");
+    C=saved; cloudFailUntil=0;
+    m.innerHTML='<span class="ok">✓ Works! Customers will now use natural AI voices.</span>';
+  }catch(err){ m.innerHTML='<span class="bad">✗ '+esc(err.message||String(err))+'</span>'; }
+};
+vUI();
+if(vEngine()==="kokoro") setTimeout(()=>loadKokoro().catch(()=>{}),1500);
 $("callType").value=load("fift_calltype","video");
 const callLabel=()=>{ $("callBtn").textContent=$("callType").value==="phone"?"📞 Call customer":"📹 Start FaceTime"; };
 $("callType").onchange=()=>{ store("fift_calltype",$("callType").value); callLabel(); }; callLabel();
