@@ -886,7 +886,7 @@ function buildMesh(F){
   base.forEach((p,i)=>{for(let j=0;j<i;j++) if(Math.abs(base[j].x-p.x)<.5&&Math.abs(base[j].y-p.y)<.5){p.x+=.7;p.y+=.7}});
   const tris=delaunay(base);
   const inner=new Set([60,61,62,63,64,65,66,67]);
-  return {base,u,tris:tris.filter(t=>!t.every(v=>inner.has(v)))};
+  return {base,u,tris};
 }
 
 /* expression state: current values ease toward targets */
@@ -974,13 +974,13 @@ function deform(){
   const E=Object.assign({},EXP,{open:Math.min(EXP.open,.85)});
   const mv=(i,x,y)=>{d[i].x+=x*u;d[i].y+=y*u};
   // jaw / talking
-  const jaw=E.open*.2;
+  const jaw=E.open*.09;
   [[7,.95],[8,1],[9,.95],[6,.8],[10,.8],[5,.6],[11,.6],[4,.35],[12,.35],[3,.12],[13,.12]].forEach(([i,w])=>mv(i,0,jaw*w));
   [55,56,57,58,59].forEach(i=>mv(i,0,jaw*.9)); [65,66,67].forEach(i=>mv(i,0,jaw*.95));
   [49,50,51,52,53].forEach(i=>mv(i,0,-jaw*.08)); [61,62,63].forEach(i=>mv(i,0,-jaw*.12));
   [48,54,60,64].forEach(i=>mv(i,0,jaw*.4));
   // ee / oo shapes
-  const w=E.wide*.05-E.round*.07;
+  const w=E.wide*.025-E.round*.04;
   mv(48,-w,0); mv(60,-w*.9,0); mv(54,w,0); mv(64,w*.9,0);
   mv(49,E.round*.03,0); mv(59,E.round*.03,0); mv(53,-E.round*.03,0); mv(55,-E.round*.03,0);
   // smile (mouth corners up/out, cheeks up, eyes crinkle)
@@ -1028,7 +1028,9 @@ function drawPhoto(){
   const fx=F.box.x+F.box.w/2, fy=F.box.y+F.box.h*.55;
   if(!F.bg||F.bg.width!==cw||F.bg.height!==ch){ const bg=document.createElement("canvas"); bg.width=cw; bg.height=ch; const b=bg.getContext("2d");
     const bs=Math.max(cw/F.w,ch/F.h)*1.1; b.filter="blur(40px) brightness(.55)"; b.drawImage(F.img,(cw-F.w*bs)/2,(ch-F.h*bs)/2,F.w*bs,F.h*bs); F.bg=bg; }
-  let s=Math.max(ch/F.h*1.06, Math.min(cw/F.w, .42*ch/F.box.h));
+  // face about a third of the screen height, never wider than the screen allows
+  let s=Math.min(.36*ch/F.box.h, 1.05*cw/F.w*(cw<ch?1.25:1), ch/F.h*1.06);
+  s=Math.max(s, Math.min(cw/F.w, ch/F.h)*.9);
   s*=1+.007*Math.sin(t*1.25);
   const hp=headPose(now);
   const dx=Math.sin(t*.41)*cw*.005+Math.sin(t*1.7)*cw*.0012+hp.dx*mesh.u*s, dy=Math.cos(t*.33)*ch*.004+hp.dy*mesh.u*s;
@@ -1040,19 +1042,7 @@ function drawPhoto(){
   const B=mesh.base, D=deform();
   const moved=D.map((p,i)=>Math.abs(p.x-B[i].x)+Math.abs(p.y-B[i].y)>.25);
   for(const [a,b,c] of mesh.tris){ if(moved[a]||moved[b]||moved[c]) warpTri(pctx,F.img,B[a],B[b],B[c],D[a],D[b],D[c]); }
-  // mouth opening: soft natural shadow between the lips (no painted teeth)
-  const gap=Math.hypot(D[66].x-D[62].x,D[66].y-D[62].y);
-  if(gap>1){
-    pctx.save(); pctx.beginPath(); [60,61,62,63,64,65,66,67].forEach((i,k)=>k?pctx.lineTo(D[i].x,D[i].y):pctx.moveTo(D[i].x,D[i].y)); pctx.closePath();
-    pctx.clip();
-    const cx=(D[60].x+D[64].x)/2, cy=(D[62].y+D[66].y)/2, mw=Math.hypot(D[64].x-D[60].x,D[64].y-D[60].y);
-    const rg=pctx.createRadialGradient(cx,cy,0,cx,cy,mw*.55);
-    rg.addColorStop(0,"rgba(25,8,8,.92)"); rg.addColorStop(.7,"rgba(45,15,15,.8)"); rg.addColorStop(1,"rgba(70,25,25,.55)");
-    pctx.fillStyle=rg; pctx.fillRect(cx-mw,cy-mw,mw*2,mw*2);
-    if(gap>mesh.u*.06){ const tg=pctx.createLinearGradient(0,D[62].y,0,D[62].y+gap*.4); tg.addColorStop(0,"rgba(215,205,190,.55)"); tg.addColorStop(1,"rgba(215,205,190,0)");
-      pctx.fillStyle=tg; pctx.fillRect(cx-mw,D[62].y-2,mw*2,gap*.4+2); }
-    pctx.restore();
-  }
+  // (no painted mouth: the photo's own lips and teeth move)
   // webcam look
   pctx.setTransform(1,0,0,1,0,0);
   const vg=pctx.createRadialGradient(cw/2,ch*.45,Math.min(cw,ch)*.35,cw/2,ch*.5,Math.max(cw,ch)*.8);
