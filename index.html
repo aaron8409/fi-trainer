@@ -97,7 +97,7 @@ ul.l li{margin-bottom:7px}
 <!-- ============ SETUP ============ -->
 <section id="vSetup" class="wrap">
   <h1>F&amp;I FaceTime Trainer</h1>
-  <div class="muted">Practice presenting Ford Protect, face to face. Every customer is randomly built and never repeats.</div><div class="muted" style="font-size:12px">Version 13 · voice test fix</div><div class="muted" style="font-size:13px" id="metCount"></div>
+  <div class="muted">Practice presenting Ford Protect, face to face. Every customer is randomly built and never repeats.</div><div class="muted" style="font-size:12px">Version 14 · 478-point face movement</div><div class="muted" style="font-size:13px" id="metCount"></div>
 
   <div class="card">
     <h2>Next customer</h2>
@@ -960,6 +960,10 @@ function setupPhotoCanvas(){
   g.putImageData(id,0,0);
   blinkAt=performance.now()+1500;
   mesh=buildMesh(C.face);
+  // upgrade to the 478-point face map in the background
+  const F0=C.face;
+  (async()=>{ try{ const L=F0.mp || await Promise.race([mpAnalyze(F0.img), new Promise((_,r)=>setTimeout(()=>r(new Error("timeout")),20000))]);
+    if(L && C && C.face===F0){ F0.mp=L; mesh=buildMeshMP(F0,L); } }catch(e){} })();
   $("remote").classList.add("photo");
 }
 const avgPt=(pts,ids)=>{let x=0,y=0;ids.forEach(i=>{x+=pts[i].x;y+=pts[i].y});return{x:x/ids.length,y:y/ids.length}};
@@ -1062,7 +1066,8 @@ function updateExpressions(){
   if(speaking) EXP.browUp=Math.max(EXP.browUp,.06+.05*Math.sin(now/300));
   // blinks (a bit more often when skeptical)
   if(now>blinkAt){ blinkUntil=now+150; blinkAt=now+(2200+Math.random()*3800)*(EXP.skeptic>.4?.7:1); }
-  EXP.blink=(C&&C.face)?0:(now<blinkUntil?1-Math.abs((blinkUntil-now)/150*2-1):0);
+  updateGaze(now);
+  EXP.blink=(C&&C.face&&!(mesh&&mesh.kind==="mp"))?0:(now<blinkUntil?1-Math.abs((blinkUntil-now)/150*2-1):0);
 }
 function headPose(now){
   let dx=0,dy=0,rot=0;
@@ -1078,6 +1083,7 @@ function headPose(now){
 
 /* move face points for the current expression */
 function deform(){
+  if(mesh&&mesh.kind==="mp") return deformMP();
   const B=mesh.base, d=B.map(p=>({x:p.x,y:p.y})), P=C.face.pts;
   const A=C.face.manual?.35:.55;                 // natural-looking strength
   const u=mesh.u*A;
@@ -1141,6 +1147,127 @@ function prepPhoto(F){
   fade(W,0,W-e,0, W-e,0,e,H);
   F.soft=c;
 }
+/* ---- MediaPipe Face Landmarker: 478 precise face points (free, runs on the phone) ---- */
+const MP_VER="0.10.14";
+let mpLand=null, mpLoading=null;
+function loadMP(){
+  if(mpLand) return Promise.resolve(mpLand);
+  if(mpLoading) return mpLoading;
+  mpLoading=(async()=>{
+    let v;
+    try{ v=await import(`https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VER}/vision_bundle.mjs`); }
+    catch(e){ v=await import(`https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VER}/+esm`); }
+    const fs=await v.FilesetResolver.forVisionTasks(`https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VER}/wasm`);
+    mpLand=await v.FaceLandmarker.createFromOptions(fs,{baseOptions:{modelAssetPath:"https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",delegate:"CPU"},runningMode:"IMAGE",numFaces:1});
+    return mpLand;
+  })();
+  mpLoading.catch(()=>{mpLoading=null;});
+  return mpLoading;
+}
+async function mpAnalyze(img){
+  const lm=await loadMP();
+  const W=img.naturalWidth||img.width, H=img.naturalHeight||img.height;
+  // work on a copy no larger than 768px (faster on phones)
+  const k=Math.min(1,768/Math.max(W,H)), c=document.createElement("canvas"); c.width=Math.round(W*k); c.height=Math.round(H*k);
+  c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+  const r=lm.detect(c);
+  if(!r||!r.faceLandmarks||!r.faceLandmarks.length) return null;
+  return r.faceLandmarks[0].map(p=>({x:p.x*W,y:p.y*H,z:p.z*W}));
+}
+
+const MPI={
+  oval:[10,338,297,332,284,251,389,356,454,323,361,288,397,365,379,378,400,377,152,148,176,149,150,136,172,58,132,93,234,127,162,21,54,103,67,109],
+  lipOutU:[61,185,40,39,37,0,267,269,270,409,291], lipOutL:[146,91,181,84,17,314,405,321,375],
+  lipInU:[78,191,80,81,82,13,312,311,310,415,308], lipInL:[95,88,178,87,14,317,402,318,324],
+  inner:[78,191,80,81,82,13,312,311,310,415,308,324,318,402,317,14,87,178,88,95],
+  eyeR:[33,246,161,160,159,158,157,173,133,155,154,153,145,144,163,7],
+  eyeL:[263,466,388,387,386,385,384,398,362,382,381,380,374,373,390,249],
+  creaseR:[247,30,29,27,28,56,190], creaseL:[467,260,259,257,258,286,414],
+  browR:[70,63,105,66,107,55,65,52,53,46], browL:[300,293,334,296,336,285,295,282,283,276],
+  nose:[1,2,4,5,6,195,197,98,327,64,294,168,19,94],
+  mid:[50,280,205,425,207,427,187,411,117,346,118,347,123,352,147,376,192,416,214,434,212,432,57,287,43,273,106,335,182,406,83,313,18,200,199,175,151,9,8,108,337,69,299,104,333],
+  iris:[468,469,470,471,472,473,474,475,476,477],
+  blinkR:[[161,163],[160,144],[159,145],[158,153],[157,154],[246,7],[173,155]],
+  blinkL:[[388,390],[387,373],[386,374],[385,380],[384,381],[466,249],[398,382]]
+};
+function buildMeshMP(F,L){
+  const sel=[...new Set([].concat(MPI.oval,MPI.lipOutU,MPI.lipOutL,MPI.lipInU,MPI.lipInL,MPI.eyeR,MPI.eyeL,MPI.creaseR,MPI.creaseL,MPI.browR,MPI.browL,MPI.nose,MPI.mid,L.length>=478?MPI.iris:[]))];
+  const base=[], idx={}, z=[];
+  sel.forEach(i=>{ idx[i]=base.length; base.push({x:L[i].x,y:L[i].y}); z.push(L[i].z); });
+  const nFace=base.length;
+  const eR=avgPt(L,MPI.eyeR), eL=avgPt(L,MPI.eyeL), u=Math.hypot(eL.x-eR.x,eL.y-eR.y)||F.w*.25;
+  const c=avgPt(L,[1,152,10]);
+  // ring outside the face (follows the face outline, a bit larger) + frame corners
+  MPI.oval.forEach(i=>{ const p=L[i]; base.push({x:c.x+(p.x-c.x)*1.32,y:c.y+(p.y-c.y)*1.28}); z.push(0); });
+  [[0,0],[.5,0],[1,0],[1,.5],[1,1],[.5,1],[0,1],[0,.5]].forEach(([x,y])=>{ base.push({x:x*F.w,y:y*F.h}); z.push(0); });
+  base.forEach((p,i)=>{for(let j=0;j<i;j++) if(Math.abs(base[j].x-p.x)<.5&&Math.abs(base[j].y-p.y)<.5){p.x+=.7;p.y+=.7}});
+  const zMean=z.slice(0,nFace).reduce((a,b)=>a+b,0)/nFace;
+  const tris=delaunay(base);
+  const lipY=(L[13].y+L[14].y)/2, chinY=L[152].y, jawHW=Math.abs(L[288].x-L[58].x)/2;
+  // jaw weights: smooth falloff below the lip line, inside the jaw
+  const jw=base.map((p,i)=>{
+    if(i>=nFace+MPI.oval.length) return 0;
+    const t=(p.y-lipY)/Math.max(1,chinY-lipY); if(t<=0) return 0;
+    const h=Math.max(0,1-Math.pow(Math.abs(p.x-c.x)/(jawHW*1.2),4));
+    const w=(t<.18?t/.18*.85:.85+.15*Math.min(1,(t-.18)/.82))*h;
+    return i>=nFace? w*.35 : w;
+  });
+  MPI.lipInL.concat(MPI.lipOutL).forEach(i=>{ if(idx[i]!=null) jw[idx[i]]=.9; });
+  [61,291,78,308].forEach(i=>{ if(idx[i]!=null) jw[idx[i]]=.35; });
+  // teeth already visible?
+  let teeth=false;
+  try{ const cv=document.createElement("canvas"); cv.width=F.w; cv.height=F.h; const x=cv.getContext("2d"); x.drawImage(F.img,0,0);
+    const xs=MPI.inner.map(i=>L[i].x), ys=MPI.inner.map(i=>L[i].y), mx=Math.min(...xs), mw=Math.max(...xs)-mx, my=Math.min(...ys), mh=Math.max(...ys)-my;
+    if(mh>u*.04){ const d=x.getImageData(Math.round(mx+mw*.2),Math.round(my),Math.max(1,Math.round(mw*.6)),Math.max(1,Math.round(mh))).data; let wht=0,n=0;
+      for(let i=0;i<d.length;i+=4){const r=d[i],g=d[i+1],b=d[i+2],Lm=.3*r+.59*g+.11*b,mxc=Math.max(r,g,b),mnc=Math.min(r,g,b); n++; if(Lm>120&&(mxc-mnc)/(mxc||1)<.3) wht++;}
+      teeth=wht/n>.15; }
+  }catch(e){}
+  return {kind:"mp",base,tris,u,idx,z,zMean,nFace,jw,c,lipY,teeth,L};
+}
+const GAZE={x:0,y:0,tx:0,ty:0,next:0};
+function deformMP(){
+  const M=mesh, B=M.base, d=B.map(p=>({x:p.x,y:p.y})), E=EXP, u=M.u, I=M.idx, now=performance.now();
+  const mv=(i,x,y)=>{ const k=I[i]; if(k!=null){ d[k].x+=x*u; d[k].y+=y*u; } };
+  // --- 3D head turn using face depth (small yaw/pitch) ---
+  const t=now/1000, hp=headPose(now);
+  const yaw=Math.sin(t*.31)*.05+Math.sin(t*.83)*.015+(HEAD&&HEAD.type==="shake"?hp.dx*1.6:0);
+  const pitch=Math.sin(t*.23)*.03+(HEAD&&HEAD.type==="nod"?hp.dy*1.8:0);
+  for(let k=0;k<M.nFace;k++){ const zr=(M.z[k]-M.zMean)/u; d[k].x+=-zr*yaw*u*.9; d[k].y+=-zr*pitch*u*.9; }
+  // --- jaw / talking ---
+  const jaw=Math.min(E.open,.9)*.15*u;
+  for(let k=0;k<d.length;k++) if(M.jw[k]) d[k].y+=jaw*M.jw[k];
+  MPI.lipInU.forEach(i=>mv(i,0,-Math.min(E.open,.9)*.012)); MPI.lipOutU.forEach(i=>mv(i,0,-Math.min(E.open,.9)*.008));
+  const w=E.wide*.035-E.round*.05; mv(61,-w,0); mv(78,-w*.9,0); mv(291,w,0); mv(308,w*.9,0);
+  // --- smile / frown ---
+  const s=E.smile*.75, f=E.frown*.75;
+  mv(61,-.045*s,-.055*s+.035*f); mv(291,.045*s,-.055*s+.035*f); mv(78,-.03*s,-.04*s+.025*f); mv(308,.03*s,-.04*s+.025*f);
+  [40,185,146,91].forEach(i=>mv(i,-.015*s,-.02*s)); [270,409,375,321].forEach(i=>mv(i,.015*s,-.02*s));
+  [205,207,50,187,425,427,280,411].forEach(i=>mv(i,0,-.025*s));
+  [145,144,153,374,373,380].forEach(i=>mv(i,0,-.01*s));
+  // --- brows ---
+  const b=E.browUp*.8, k2=E.skeptic*.8, fu=E.frown*.6+E.skeptic*.2;
+  MPI.browR.forEach(i=>mv(i,0,-.055*b-.045*k2)); MPI.browL.forEach(i=>mv(i,0,-.055*b+.02*k2));
+  [55,65,107,66].forEach(i=>mv(i,.02*fu,.03*fu)); [285,295,336,296].forEach(i=>mv(i,-.02*fu,.03*fu));
+  MPI.creaseR.forEach(i=>mv(i,0,-.018*b-.012*k2)); MPI.creaseL.forEach(i=>mv(i,0,-.018*b+.006*k2));
+  [151,9,108,337,69,299,104,333].forEach(i=>mv(i,0,-.015*b));
+  // --- eyes: gaze + blink ---
+  if(I[468]!=null){ const ew=u*.11; [468,469,470,471,472].forEach(i=>{const kk=I[i]; d[kk].x+=GAZE.x*ew; d[kk].y+=GAZE.y*ew*.6;}); [473,474,475,476,477].forEach(i=>{const kk=I[i]; d[kk].x+=GAZE.x*ew; d[kk].y+=GAZE.y*ew*.6;}); }
+  const bl=Math.min(1,E.blink+E.squint*.25);
+  if(bl>0){
+    const L=M.L;
+    const close=(pairs,crease)=>{ let tot=0; pairs.forEach(([up,lo])=>{ const ku=I[up]; if(ku==null) return; const dy=(L[lo].y-L[up].y)*.96*bl; d[ku].y+=dy; tot+=dy; });
+      const avg=tot/pairs.length; crease.forEach(i=>{ const kk=I[i]; if(kk!=null) d[kk].y+=avg*.45; }); };
+    close(MPI.blinkR,MPI.creaseR); close(MPI.blinkL,MPI.creaseL);
+    if(I[468]!=null) [468,469,470,471,472,473,474,475,476,477].forEach(i=>{ d[I[i]].y+=u*.02*bl; });
+  }
+  return d;
+}
+function updateGaze(now){
+  if(now>GAZE.next){ const look=Math.random(); GAZE.tx=look<.55?0:(Math.random()-.5)*1.2; GAZE.ty=look<.55?0:(Math.random()-.5)*.8; if(speaking&&Math.random()<.4){GAZE.tx=(Math.random()-.5)*.6;}
+    GAZE.next=now+1200+Math.random()*2800; }
+  GAZE.x+=(GAZE.tx-GAZE.x)*.35; GAZE.y+=(GAZE.ty-GAZE.y)*.35;
+}
+
 function warpTri(ctx,img,s0,s1,s2,d0,d1,d2){
   const den=s0.x*(s1.y-s2.y)+s1.x*(s2.y-s0.y)+s2.x*(s0.y-s1.y); if(Math.abs(den)<1e-6) return;
   const a=(d0.x*(s1.y-s2.y)+d1.x*(s2.y-s0.y)+d2.x*(s0.y-s1.y))/den;
@@ -1178,13 +1305,16 @@ function drawPhoto(){
   const moved=D.map((p,i)=>Math.abs(p.x-B[i].x)+Math.abs(p.y-B[i].y)>.25);
   for(const [a,b,c] of mesh.tris){ if(moved[a]||moved[b]||moved[c]) warpTri(pctx,F.soft,B[a],B[b],B[c],D[a],D[b],D[c]); }
   // lips part: soft shadow only between the real lips (skipped when the photo already shows teeth)
-  const gap=Math.hypot(D[66].x-D[62].x,D[66].y-D[62].y);
-  if(!F.teeth && gap>1.2){
-    pctx.save(); pctx.beginPath(); [60,61,62,63,64,65,66,67].forEach((i,k)=>k?pctx.lineTo(D[i].x,D[i].y):pctx.moveTo(D[i].x,D[i].y)); pctx.closePath(); pctx.clip();
-    const cx=(D[60].x+D[64].x)/2, cy=(D[62].y+D[66].y)/2, mw=Math.hypot(D[64].x-D[60].x,D[64].y-D[60].y);
+  const isMP=mesh.kind==="mp", mi=i=>D[mesh.idx[i]];
+  const inn=isMP?MPI.inner.map(mi):[60,61,62,63,64,65,66,67].map(i=>D[i]);
+  const up=isMP?mi(13):D[62], lo=isMP?mi(14):D[66], cL=isMP?mi(78):D[60], cR=isMP?mi(308):D[64];
+  const gap=Math.hypot(lo.x-up.x,lo.y-up.y), hasTeeth=isMP?mesh.teeth:F.teeth;
+  if(!hasTeeth && gap>1.2){
+    pctx.save(); pctx.beginPath(); inn.forEach((q,k)=>k?pctx.lineTo(q.x,q.y):pctx.moveTo(q.x,q.y)); pctx.closePath(); pctx.clip();
+    const cx=(cL.x+cR.x)/2, cy=(up.y+lo.y)/2, mw=Math.hypot(cR.x-cL.x,cR.y-cL.y);
     pctx.translate(cx,cy); pctx.scale(1,Math.max(.15,gap/(mw*.9)));
     const rg=pctx.createRadialGradient(0,0,0,0,0,mw*.5);
-    rg.addColorStop(0,"rgba(30,8,10,.88)"); rg.addColorStop(.6,"rgba(45,14,16,.7)"); rg.addColorStop(1,"rgba(80,30,30,0)");
+    rg.addColorStop(0,"rgba(30,8,10,.9)"); rg.addColorStop(.6,"rgba(45,14,16,.72)"); rg.addColorStop(1,"rgba(80,30,30,0)");
     pctx.fillStyle=rg; pctx.fillRect(-mw,-mw,mw*2,mw*2);
     pctx.restore();
   }
@@ -1327,7 +1457,7 @@ function animFace(){
   const pav=document.getElementById("phoneAv");
   if(pav){ updateExpressions(); pav.classList.toggle("talk",!!speaking); const ps=$("phoneSub"); if(ps&&G.status==="live") ps.textContent=$("timer").textContent; requestAnimationFrame(animFace); return; }
   if(C&&C.face&&C.face.video&&vid){ updateExpressions(); animVideo(); requestAnimationFrame(animFace); return; }
-  if(C&&C.face&&pctx&&mesh){ drawPhoto(); requestAnimationFrame(animFace); return; }
+  if(C&&C.face&&pctx&&mesh){ animFace.n=(animFace.n||0)+1; if(!(IS_IOS&&mesh.kind==="mp"&&animFace.n%2)) drawPhoto(); requestAnimationFrame(animFace); return; }
   if(C) updateExpressions();
   mouthOpen=EXP.open*20;
   const sm=(G.smile||0)*.5+(EXP.smile-EXP.frown)*9, o=mouthOpen;
