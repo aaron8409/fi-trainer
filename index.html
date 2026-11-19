@@ -97,7 +97,7 @@ ul.l li{margin-bottom:7px}
 <!-- ============ SETUP ============ -->
 <section id="vSetup" class="wrap">
   <h1>F&amp;I FaceTime Trainer</h1>
-  <div class="muted">Practice presenting Ford Protect, face to face. Every customer is randomly built and never repeats.</div><div class="muted" style="font-size:12px">Version 12 · free unlimited on-device AI voice</div><div class="muted" style="font-size:13px" id="metCount"></div>
+  <div class="muted">Practice presenting Ford Protect, face to face. Every customer is randomly built and never repeats.</div><div class="muted" style="font-size:12px">Version 13 · voice test fix</div><div class="muted" style="font-size:13px" id="metCount"></div>
 
   <div class="card">
     <h2>Next customer</h2>
@@ -1280,7 +1280,7 @@ function renderBrief(){
 const SKINS=["#f2cfb3","#e5b48f","#c99067","#a8714a","#7c4c2c","#5b3720"];
 const HAIRS=["#1d1612","#3d2a1d","#6b4a2e","#9a7244","#555","#2a2a2a","#d2ccc3"];
 function faceSVG(){
-  const s=SKINS[C.skin], h=HAIRS[C.hair], f=C.gender==="f";
+  const s=SKINS[C.skin]||SKINS[2], h=HAIRS[C.hair]||HAIRS[1], f=C.gender==="f";
   const st=C.hairStyle||0;
   const hair=f?[
       `<path d="M88 150 Q80 52 200 46 Q320 52 312 150 L326 330 Q290 300 290 210 Q276 120 200 116 Q124 120 110 210 Q110 300 74 330Z" fill="${h}"/>`,
@@ -1607,9 +1607,9 @@ function fillVoicePickers(){
 }
 function previewVoice(g){
   const sel=$(g==="m"?"voiceM":"voiceF"); store(g==="m"?"fift_vm":"fift_vf",sel.value);
-  const saved=C; C={gender:g,personaKey:"friendly",voiceSeed:.5,speechRate:1,age:40};
-  speaking=false; G.status="preview";
-  say(g==="m"?"Hey, how's it going? Honestly, I already told the salesman I don't need anything extra.":"Hi! So, I'm kind of nervous. This is my first new car, and I really don't want any surprise bills.").then(()=>{C=saved;});
+  const saved=C, stub={__stub:true,gender:g,personaKey:"friendly",voiceSeed:.5,speechRate:1,age:40}; C=stub;
+  speaking=false; if(G.status!=="live") G.status="preview";
+  say(g==="m"?"Hey, how's it going? Honestly, I already told the salesman I don't need anything extra.":"Hi! So, I'm kind of nervous. This is my first new car, and I really don't want any surprise bills.").then(()=>{ if(C===stub) C=saved; },()=>{ if(C===stub) C=saved; });
 }
 
 /* =====================================================================
@@ -1966,7 +1966,7 @@ function ringTone(){
 function stopRing(){clearInterval(ringInt)}
 
 /* -------- controls -------- */
-$("callBtn").onclick=()=>{ unlockAudio(); startCall(); };
+$("callBtn").onclick=()=>{ if(!C||C.__stub){ show("vSetup"); return; } speechSynthesis.cancel(); try{getAudioEl().pause()}catch(e){} unlockAudio(); startCall(); };
 $("endBtn").onclick=()=>{ if(G.status==="live"||G.status==="ringing"||G.status==="bought"||G.status==="walked") endCall(); };
 $("micBtn").onclick=()=>{ micOn=!micOn; $("micBtn").classList.toggle("live",micOn); $("micBtn").textContent=micOn?"🎤":"🔇"; if(micOn) startListening(); else stopListening(); setTurn(); };
 $("voiceBlockEnd").onclick=()=>{ $("voiceBlock").classList.add("hidden"); endCall(); };
@@ -2001,11 +2001,11 @@ $("vTest").onclick=async()=>{
       m.textContent="Downloading the voice… 0%";
       await loadKokoro(pct=>{ m.textContent="Downloading the voice… "+pct+"%"; });
       m.textContent="Voice ready. Playing a sample…";
-      const saved=C; C={gender:"m",age:45,first:"Mike",personaKey:"friendly",persona:{label:"friendly"},voiceSeed:.1,speechRate:1}; G.status="preview";
+      const saved=C, stub={__stub:true,gender:"m",age:45,first:"Mike",name:"",personaKey:"friendly",persona:{label:"friendly"},voiceSeed:.1,speechRate:1}; C=stub; if(G.status!=="live") G.status="preview";
       await sayKokoro("Hey, how's it going? Honestly, I already told the salesman I don't need anything extra.");
-      C=saved; cloudFailUntil=0;
+      if(C===stub) C=saved; cloudFailUntil=0;
       m.innerHTML='<span class="ok">✓ Works! Customers will now use the free on-device AI voice.</span>';
-    }catch(err){ m.innerHTML='<span class="bad">✗ Couldn\'t run the on-device voice here ('+esc(String(err&&err.message||err).slice(0,120))+'). This phone may not have enough memory. Try Puter or Azure instead.</span>'; }
+    }catch(err){ if(C&&C.__stub) C=null; m.innerHTML='<span class="bad">✗ Couldn\'t run the on-device voice here ('+esc(String(err&&err.message||err).slice(0,120))+'). This phone may not have enough memory. Try Puter or Azure instead.</span>'; }
     return;
   }
   if(!k && e!=="puter"){ m.innerHTML='<span class="bad">Paste your key first.</span>'; return; }
@@ -2017,11 +2017,11 @@ $("vTest").onclick=async()=>{
       const j=await r.json(); const vs=(j.voices||[]).map(v=>({id:v.voice_id,name:v.name,g:/female|woman/i.test((v.labels&&v.labels.gender)||"")?"f":/male|man/i.test((v.labels&&v.labels.gender)||"")?"m":"?",a:(((v.labels&&v.labels.age)||"").match(/old|young|middle/i)||["middle"])[0].toLowerCase()})).filter(v=>v.g!=="?");
       store("fift_el_voices",vs);
     }
-    const saved=C; C={gender:"m",age:45,first:"Mike",personaKey:"friendly",persona:{label:"friendly"},voiceSeed:Math.random()}; G.status="preview";
+    const saved=C, stub={__stub:true,gender:"m",age:45,first:"Mike",name:"",personaKey:"friendly",persona:{label:"friendly"},voiceSeed:Math.random()}; C=stub; if(G.status!=="live") G.status="preview";
     await sayCloud("Hey, how's it going? Honestly, I already told the salesman I don't need anything extra.");
-    C=saved; cloudFailUntil=0;
+    if(C===stub) C=saved; cloudFailUntil=0;
     m.innerHTML='<span class="ok">✓ Works! Customers will now use natural AI voices.</span>';
-  }catch(err){ m.innerHTML='<span class="bad">✗ '+esc(err.message||String(err))+'</span>'; }
+  }catch(err){ if(C&&C.__stub) C=null; m.innerHTML='<span class="bad">✗ '+esc(err.message||String(err))+'</span>'; }
 };
 vUI();
 if(vEngine()==="kokoro") setTimeout(()=>loadKokoro().catch(()=>{}),1500);
