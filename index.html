@@ -97,7 +97,7 @@ ul.l li{margin-bottom:7px}
 <!-- ============ SETUP ============ -->
 <section id="vSetup" class="wrap">
   <h1>F&amp;I FaceTime Trainer</h1>
-  <div class="muted">Practice presenting Ford Protect, face to face. Every customer is randomly built and never repeats.</div><div class="muted" style="font-size:12px">Version 14 · 478-point face movement</div><div class="muted" style="font-size:13px" id="metCount"></div>
+  <div class="muted">Practice presenting Ford Protect, face to face. Every customer is randomly built and never repeats.</div><div class="muted" style="font-size:12px">Version 15 · solid teeth mouth</div><div class="muted" style="font-size:13px" id="metCount"></div>
 
   <div class="card">
     <h2>Next customer</h2>
@@ -1282,6 +1282,50 @@ function warpTri(ctx,img,s0,s1,s2,d0,d1,d2){
   ctx.transform(a,b,c,dd,e,f); ctx.drawImage(img,0,0); ctx.restore();
 }
 
+/* ---- Mouth: real teeth move as solid pieces (never stretched), dark gap between ---- */
+function mouthSets(){
+  if(mesh._ms) return mesh._ms;
+  const isMP=mesh.kind==="mp", ix=i=>isMP?mesh.idx[i]:i;
+  const U=(isMP?[78,191,80,81,82,13,312,311,310,415,308]:[60,61,62,63,64]).map(ix);
+  const Lw=(isMP?[78,95,88,178,87,14,317,402,318,324,308]:[60,67,66,65,64]).map(ix);
+  const ring=U.concat(Lw.slice(1,-1).reverse());
+  const B=mesh.base, inPoly=(p,poly)=>{let c=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const a=B[poly[i]],b=B[poly[j]];if((a.y>p.y)!==(b.y>p.y)&&p.x<(b.x-a.x)*(p.y-a.y)/(b.y-a.y)+a.x)c=!c;}return c;};
+  const rs=new Set(ring), skip=new Set();
+  for(const [a,b,c] of mesh.tris){ if(rs.has(a)&&rs.has(b)&&rs.has(c)){ const g={x:(B[a].x+B[b].x+B[c].x)/3,y:(B[a].y+B[b].y+B[c].y)/3}; if(inPoly(g,ring)) skip.add(a+","+b+","+c); } }
+  return mesh._ms={U,Lw,ring,skip,up:ix(isMP?13:62),lo:ix(isMP?14:66)};
+}
+function drawMouth(F,B,D,MS){
+  const ctx=pctx, hasTeeth=mesh.kind==="mp"?mesh.teeth:F.teeth;
+  const path=(pts)=>{ctx.beginPath();pts.forEach((q,k)=>k?ctx.lineTo(q.x,q.y):ctx.moveTo(q.x,q.y));ctx.closePath();};
+  const ringD=MS.ring.map(i=>D[i]), ringB=MS.ring.map(i=>B[i]);
+  const dU={x:D[MS.up].x-B[MS.up].x,y:D[MS.up].y-B[MS.up].y}, dL={x:D[MS.lo].x-B[MS.lo].x,y:D[MS.lo].y-B[MS.lo].y};
+  const gap=Math.hypot(D[MS.lo].x-D[MS.up].x,D[MS.lo].y-D[MS.up].y)-Math.hypot(B[MS.lo].x-B[MS.up].x,B[MS.lo].y-B[MS.up].y);
+  if(!hasTeeth && gap<.8) { // mouth closed: just the photo
+    ctx.save(); path(ringD); ctx.clip(); ctx.translate(dU.x,dU.y); ctx.drawImage(F.soft,0,0); ctx.restore(); return; }
+  const xs=ringD.map(p=>p.x), ys=ringD.map(p=>p.y), x0=Math.min(...xs), x1=Math.max(...xs), y0=Math.min(...ys), y1=Math.max(...ys), mw=x1-x0;
+  ctx.save(); path(ringD); ctx.clip();
+  // dark mouth inside
+  const rg=ctx.createRadialGradient((x0+x1)/2,(y0+y1)/2,0,(x0+x1)/2,(y0+y1)/2,mw*.55);
+  rg.addColorStop(0,"rgb(26,7,9)"); rg.addColorStop(.7,"rgb(42,12,14)"); rg.addColorStop(1,"rgb(66,24,26)");
+  ctx.fillStyle=rg; ctx.fillRect(x0-2,y0-2,mw+4,y1-y0+4);
+  if(hasTeeth){
+    // split the photo's teeth along the seam between the upper and lower lips
+    const seam=MS.U.map((ui,k)=>{const li=MS.Lw[k]; return {x:(B[ui].x+B[li].x)/2,y:(B[ui].y+B[li].y)/2};});
+    const upPoly=MS.U.map(i=>B[i]).concat(seam.slice().reverse()), loPoly=seam.concat(MS.Lw.slice().reverse().map(i=>B[i]));
+    // lower teeth ride with the jaw
+    ctx.save(); ctx.translate(dL.x,dL.y); path(loPoly); ctx.clip(); ctx.drawImage(F.soft,0,0); ctx.restore();
+    // upper teeth stay with the upper lip (solid, no stretching)
+    ctx.save(); ctx.translate(dU.x,dU.y); path(upPoly); ctx.clip(); ctx.drawImage(F.soft,0,0);
+    // soft shade on the bottom edge of the upper teeth once the mouth opens
+    if(gap>1){ const sy=Math.max(...seam.map(p=>p.y)); const sg=ctx.createLinearGradient(0,sy-gap*.6,0,sy+1); sg.addColorStop(0,"rgba(20,5,6,0)"); sg.addColorStop(1,"rgba(20,5,6,"+Math.min(.35,gap*.04)+")"); ctx.fillStyle=sg; ctx.fillRect(x0-mw,sy-gap-2,mw*3,gap+4); }
+    ctx.restore();
+  }
+  // shadow just inside the lips for depth
+  ctx.shadowColor="rgba(10,2,3,.7)"; ctx.shadowBlur=Math.max(2,mw*.05); ctx.lineWidth=Math.max(1,mw*.025); ctx.strokeStyle="rgba(30,8,10,.55)";
+  path(ringD); ctx.stroke();
+  ctx.restore();
+}
+
 function drawPhoto(){
   const F=C&&C.face; if(!F||!pctx||!mesh) return;
   updateExpressions();
@@ -1303,21 +1347,9 @@ function drawPhoto(){
   // warp only the triangles that moved
   const B=mesh.base, D=deform();
   const moved=D.map((p,i)=>Math.abs(p.x-B[i].x)+Math.abs(p.y-B[i].y)>.25);
-  for(const [a,b,c] of mesh.tris){ if(moved[a]||moved[b]||moved[c]) warpTri(pctx,F.soft,B[a],B[b],B[c],D[a],D[b],D[c]); }
-  // lips part: soft shadow only between the real lips (skipped when the photo already shows teeth)
-  const isMP=mesh.kind==="mp", mi=i=>D[mesh.idx[i]];
-  const inn=isMP?MPI.inner.map(mi):[60,61,62,63,64,65,66,67].map(i=>D[i]);
-  const up=isMP?mi(13):D[62], lo=isMP?mi(14):D[66], cL=isMP?mi(78):D[60], cR=isMP?mi(308):D[64];
-  const gap=Math.hypot(lo.x-up.x,lo.y-up.y), hasTeeth=isMP?mesh.teeth:F.teeth;
-  if(!hasTeeth && gap>1.2){
-    pctx.save(); pctx.beginPath(); inn.forEach((q,k)=>k?pctx.lineTo(q.x,q.y):pctx.moveTo(q.x,q.y)); pctx.closePath(); pctx.clip();
-    const cx=(cL.x+cR.x)/2, cy=(up.y+lo.y)/2, mw=Math.hypot(cR.x-cL.x,cR.y-cL.y);
-    pctx.translate(cx,cy); pctx.scale(1,Math.max(.15,gap/(mw*.9)));
-    const rg=pctx.createRadialGradient(0,0,0,0,0,mw*.5);
-    rg.addColorStop(0,"rgba(30,8,10,.9)"); rg.addColorStop(.6,"rgba(45,14,16,.72)"); rg.addColorStop(1,"rgba(80,30,30,0)");
-    pctx.fillStyle=rg; pctx.fillRect(-mw,-mw,mw*2,mw*2);
-    pctx.restore();
-  }
+  const MS=mouthSets(); // triangles inside the mouth opening are never stretched
+  for(const [a,b,c] of mesh.tris){ if(MS.skip.has(a+","+b+","+c)) continue; if(moved[a]||moved[b]||moved[c]) warpTri(pctx,F.soft,B[a],B[b],B[c],D[a],D[b],D[c]); }
+  drawMouth(F,B,D,MS);
   // webcam look
   pctx.setTransform(1,0,0,1,0,0);
   const vg=pctx.createRadialGradient(cw/2,ch*.45,Math.min(cw,ch)*.35,cw/2,ch*.5,Math.max(cw,ch)*.8);
