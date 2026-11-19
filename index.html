@@ -89,7 +89,7 @@ ul.l li{margin-bottom:7px}
 <!-- ============ SETUP ============ -->
 <section id="vSetup" class="wrap">
   <h1>F&amp;I FaceTime Trainer</h1>
-  <div class="muted">Practice presenting Ford Protect, face to face. Every customer is randomly built and never repeats.</div><div class="muted" style="font-size:13px" id="metCount"></div>
+  <div class="muted">Practice presenting Ford Protect, face to face. Every customer is randomly built and never repeats.</div><div class="muted" style="font-size:12px">Version 8 · talking videos</div><div class="muted" style="font-size:13px" id="metCount"></div>
 
   <div class="card">
     <h2>Next customer</h2>
@@ -99,7 +99,7 @@ ul.l li{margin-bottom:7px}
       <div><label>Customer brain</label>
         <select id="brain"><option value="auto">Auto (best available)</option><option value="ai">Chrome built-in AI</option><option value="script">Scripted (works everywhere)</option></select></div>
       <div><label>Customer look</label>
-        <select id="look"><option value="auto">Realistic photo (automatic)</option><option value="folder">Realistic photo (my photo folder)</option><option value="cartoon">Drawn face</option></select></div>
+        <select id="look"><option value="auto">Realistic photo (automatic)</option><option value="folder">My videos &amp; photos</option><option value="cartoon">Drawn face</option></select></div>
       <div><label>Record my side (camera + mic)</label>
         <select id="recOpt"><option value="no">No</option><option value="yes">Yes, save video after call</option></select></div>
     </div>
@@ -125,6 +125,8 @@ ul.l li{margin-bottom:7px}
       <div><label style="text-transform:none;letter-spacing:0;font-size:14px;color:var(--text);margin-bottom:6px">Add face photos (select several at once)</label><input type="file" id="photoIn" accept="image/*" multiple></div>
       <div style="flex:0 0 auto"><button class="ghost" id="clearPhotos">Clear photos</button></div>
     </div>
+    <div style="margin-top:14px"><label style="text-transform:none;letter-spacing:0;font-size:14px;color:var(--text);margin-bottom:6px">🎬 Add talking videos (most realistic). Each video becomes a customer.</label><input type="file" id="videoIn" accept="video/*" multiple></div>
+    <div id="videoProg" style="font-size:13px;margin-top:4px"></div>
     <button class="ghost" id="testBtn" style="margin-top:10px">Test realistic faces</button>
     <div id="testOut" style="font-size:13px;margin-top:8px"></div>
     <div class="muted" id="photoInfo" style="font-size:13px;margin-top:8px"></div>
@@ -715,7 +717,8 @@ async function idbClear(){memFaces=[];if(idbOK!==false){try{const db=await idb()
 
 async function photoStatus(){
   const all=await idbAll(), left=all.filter(f=>!f.used).length;
-  $("photoInfo").innerHTML=all.length?`<b>${left} unused</b> of ${all.length} photos ready.${idbOK===false?' <span class="wn">(This viewer can\'t save them, so they\'ll be gone when you close it. Open the file in Chrome to keep them.)</span>':""}`:"No photos added yet.";
+  const vids=all.filter(f=>f.kind==="video"&&!f.used).length;
+  $("photoInfo").innerHTML=all.length?`<b>${left} unused</b> of ${all.length} faces ready${vids?` (${vids} talking video${vids===1?"":"s"})`:""}.${idbOK===false?' <span class="wn">(This viewer can\'t save them, so they\'ll be gone when you close it. Open the file in Chrome to keep them.)</span>':""}`:"No photos added yet.";
   const th=$("thumbs"); th.innerHTML="";
   const AGES=[25,35,45,55,65,75];
   all.slice(-60).forEach(f=>{
@@ -726,6 +729,7 @@ async function photoStatus(){
     ["m","f"].forEach(g=>AGES.forEach(a=>{const o=document.createElement("option");o.value=g+a;o.textContent=(g==="m"?"Man ":"Woman ")+(a===75?"70+":(a-5)+"s");sel.appendChild(o)}));
     const near=AGES.reduce((p,c)=>Math.abs(c-f.age)<Math.abs(p-f.age)?c:p); sel.value=f.gender+near;
     sel.onchange=async()=>{f.gender=sel.value[0]; f.age=+sel.value.slice(1)+RI(-4,4); f.manual=false; im.style.outline="none"; await idbPut(f);};
+    if(f.kind==="video"){ box.style.position="relative"; const tag=document.createElement("div"); tag.textContent="🎬"; tag.style.cssText="position:absolute;left:4px;top:4px;font-size:14px"; box.appendChild(tag); }
     box.appendChild(im); box.appendChild(sel); th.appendChild(box);
   });
   return {all:all.length,left};
@@ -752,6 +756,39 @@ async function addPhotos(files){
     (manual?`<br><span class="wn">${manual} photo${manual===1?"":"s"} couldn't be auto-read, so tap each one below to set <b>man/woman and age</b>. The face will still talk and blink.</span>`:"")+
     (reasons.size?`<br><span class="muted">Details: ${esc([...reasons].join("; "))}</span>`:"")+
     (ok?"<br>Customer look is set to your photos. Tap <b>Get next customer</b>.":"");
+  if(ok){ $("look").value="folder"; store("fift_look","folder"); }
+  await photoStatus();
+}
+
+/* ---- talking videos: each one becomes a customer ---- */
+function videoPoster(src){
+  return new Promise(res=>{
+    const v=document.createElement("video"); v.muted=true; v.playsInline=true; v.setAttribute("playsinline",""); v.preload="auto"; v.src=src;
+    let done=false; const fin=(val)=>{ if(done)return; done=true; res(val); };
+    const grab=()=>{ try{ const c=document.createElement("canvas"); const w=v.videoWidth||512,h=v.videoHeight||512; c.width=Math.min(w,512); c.height=Math.round(c.width*h/w);
+      const x=c.getContext("2d"); x.drawImage(v,0,0,c.width,c.height);
+      const d=x.getImageData(0,0,c.width,8).data; let r=0,g=0,b=0,n=0; for(let i=0;i<d.length;i+=16){r+=d[i];g+=d[i+1];b+=d[i+2];n++}
+      fin({poster:c.toDataURL("image/jpeg",.85),w,h,bg:`rgb(${Math.round(r/n*.85)},${Math.round(g/n*.85)},${Math.round(b/n*.85)})`}); }catch(e){ fin({poster:null,w:v.videoWidth||512,h:v.videoHeight||512,bg:"#2a2622"}); } };
+    v.onloadeddata=()=>{ try{ v.currentTime=.05; }catch(e){ grab(); } };
+    v.onseeked=grab; v.onerror=()=>fin(null);
+    setTimeout(()=>fin(null),8000);
+    try{ v.load(); }catch(e){}
+  });
+}
+async function addVideos(files){
+  const st=$("videoProg"); let ok=0,skip=0,i=0;
+  for(const f of files){
+    i++; st.textContent=`Adding video ${i} of ${files.length}…`;
+    try{
+      if(f.size>25e6){ skip++; continue; }
+      const dataUrl=await blobToDataURL(f);
+      const meta=await videoPoster(dataUrl);
+      if(!meta){ skip++; continue; }
+      await idbPut({kind:"video",video:dataUrl,dataUrl:meta.poster,w:meta.w,h:meta.h,bgCol:meta.bg,gender:Math.random()<.5?"m":"f",age:40,manual:true,used:false,name:f.name});
+      ok++;
+    }catch(e){ skip++; }
+  }
+  st.innerHTML=`<span class="ok">Added ${ok} video${ok===1?"":"s"}.</span>${skip?` Skipped ${skip} (too big or couldn't open).`:""}${ok?" <b>Set man/woman and age under each one below.</b>":""}`;
   if(ok){ $("look").value="folder"; store("fift_look","folder"); }
   await photoStatus();
 }
@@ -824,8 +861,14 @@ async function getFace(){
     const all=await idbAll(); const unused=all.filter(f=>!f.used);
     if(look==="folder"||unused.length){
       let broken=0;
-      for(const f of shuffle(unused)){
+      const order=shuffle(unused.filter(f=>f.kind==="video")).concat(shuffle(unused.filter(f=>f.kind!=="video")));
+      for(const f of order){
         try{
+          if(f.kind==="video"){
+            if(!f._img&&f.dataUrl) f._img=await loadImg(f.dataUrl).catch(()=>null);
+            f.used=true; await idbPut(f); photoStatus();
+            return Object.assign({},f,{img:f._img||{src:""},box:{x:f.w*.25,y:f.h*.2,w:f.w*.5,h:f.h*.6}});
+          }
           if(!f._img) f._img = f.dataUrl ? await loadImg(f.dataUrl) : await blobToImg(f.blob);
           const k=f.w/1024, isTmpl=f.tmpl || (f.pts&&f.pts[30]&&Math.abs(f.pts[30].x-512*k)<1.5&&Math.abs(f.pts[27].x-512*k)<1.5&&Math.abs(f.pts[36].x-334*k)<1.5);
           if(isTmpl){ const t=templateFace(f._img); f.pts=t.pts; f.box=t.box; f.skin=t.skin; f.tmpl=true; }
@@ -850,6 +893,45 @@ async function getFace(){
   return null;
 }
 function hint2(t){ const el=$("lookMsg"); if(el){ el.textContent=t; el.classList.remove("hidden"); } }
+
+/* ---- talking-video customer ---- */
+let vid=null, vcv=null, vctx=null, voff=null;
+function setupVideoFace(){
+  const F=C.face;
+  $("remote").classList.add("photo");
+  $("faceHolder").innerHTML=`<canvas id="vidCv" style="position:absolute;inset:0;width:100%;height:100%"></canvas>
+    <video id="custVid" muted playsinline loop preload="auto" style="position:absolute;left:0;top:0;width:2px;height:2px;opacity:.01;pointer-events:none"></video>`;
+  vcv=$("vidCv"); vctx=vcv.getContext("2d");
+  const fit=()=>{const d=Math.min(1.5,devicePixelRatio||1);vcv.width=innerWidth*d;vcv.height=innerHeight*d};
+  fit(); addEventListener("resize",fit);
+  voff=document.createElement("canvas");
+  vid=$("custVid"); vid.setAttribute("playsinline",""); vid.src=F.video; vid.load();
+  vid.addEventListener("loadeddata",()=>{ try{vid.currentTime=0}catch(e){} },{once:true});
+}
+function animVideo(){
+  const now=performance.now(), t=now/1000, F=C.face;
+  if(speaking && vid.paused){ vid.play().catch(()=>{}); }
+  if(!speaking && !vid.paused){ vid.pause(); try{ vid.currentTime=0; }catch(e){} }
+  const cw=vcv.width, ch=vcv.height, vw=vid.videoWidth||F.w||512, vh=vid.videoHeight||F.h||512;
+  // background in the video's own colors
+  const g=vctx.createRadialGradient(cw/2,ch*.42,0,cw/2,ch*.45,Math.max(cw,ch)*.75);
+  g.addColorStop(0,F.bgCol||"#3a332c"); g.addColorStop(1,"#0d0b0a");
+  vctx.setTransform(1,0,0,1,0,0); vctx.fillStyle=g; vctx.fillRect(0,0,cw,ch);
+  if(vid.readyState>=2){
+    // soft-edged copy of the current frame
+    if(voff.width!==vw||voff.height!==vh){ voff.width=vw; voff.height=vh; }
+    const o=voff.getContext("2d"); o.globalCompositeOperation="source-over"; o.clearRect(0,0,vw,vh); o.drawImage(vid,0,0,vw,vh);
+    o.globalCompositeOperation="destination-out";
+    const fade=(x0,y0,x1,y1,rx,ry,rw,rh)=>{const gr=o.createLinearGradient(x0,y0,x1,y1);gr.addColorStop(0,"rgba(0,0,0,1)");gr.addColorStop(.35,"rgba(0,0,0,.6)");gr.addColorStop(1,"rgba(0,0,0,0)");o.fillStyle=gr;o.fillRect(rx,ry,rw,rh)};
+    const e=vw*.16, eb=vh*.2;
+    fade(0,0,0,e,0,0,vw,e); fade(0,vh,0,vh-eb,0,vh-eb,vw,eb); fade(0,0,e,0,0,0,e,vh); fade(vw,0,vw-e,0,vw-e,0,e,vh);
+    const hp=headPose(now);
+    let s=cw<ch ? cw/vw*.96 : ch/vh*.9; s*=1+.006*Math.sin(t*1.25);
+    const dx=Math.sin(t*.41)*cw*.004+hp.dx*vw*s*.3, dy=Math.cos(t*.33)*ch*.003+hp.dy*vh*s*.3, rot=Math.sin(t*.27)*.008+hp.rot;
+    vctx.translate(cw/2+dx,ch*.44+dy); vctx.rotate(rot); vctx.scale(s,s); vctx.drawImage(voff,-vw/2,-vh/2);
+    vctx.setTransform(1,0,0,1,0,0);
+  }
+}
 
 /* ---- live photo rendering: expressive mesh-warped face ---- */
 let pcv=null, pctx=null, grain=null, blinkAt=0, blinkUntil=0, mesh=null;
@@ -984,7 +1066,7 @@ function deform(){
   const B=mesh.base, d=B.map(p=>({x:p.x,y:p.y})), P=C.face.pts;
   const A=C.face.manual?.35:.55;                 // natural-looking strength
   const u=mesh.u*A;
-  const E=Object.assign({},EXP,{open:Math.min(EXP.open,.85)});
+  const E=Object.assign({},EXP,{open:0,wide:0,round:0}); // photos: no fake mouth movement
   const mv=(i,x,y)=>{d[i].x+=x*u;d[i].y+=y*u};
   const uj=mesh.u*.6, mvJ=(i,x,y)=>{d[i].x+=x*uj;d[i].y+=y*uj};
   // jaw / talking
@@ -1227,6 +1309,7 @@ function setMood(){
   $("moodTxt").textContent=m>=80?"Ready to buy":m>=65?"Warming up":m>=45?"Listening":m>=25?"Skeptical":"Shutting down";
 }
 function animFace(){
+  if(C&&C.face&&C.face.video&&vid){ updateExpressions(); animVideo(); requestAnimationFrame(animFace); return; }
   if(C&&C.face&&pctx&&mesh){ drawPhoto(); requestAnimationFrame(animFace); return; }
   if(C) updateExpressions();
   mouthOpen=EXP.open*20;
@@ -1444,8 +1527,8 @@ async function startCall(){
      costTalk:0, rapport:0, idle:0, busy:false, start:0, menuShown:false, brain:"script", objLog:[]};
   show("call");
   $("remote").classList.remove("photo");
-  Object.keys(EXP).forEach(k=>EXP[k]=0); EMO.kind="neutral"; HEAD=null; mesh=null; pctx=null;
-  if(C.face) setupPhotoCanvas(); else $("faceHolder").innerHTML=faceSVG();
+  Object.keys(EXP).forEach(k=>EXP[k]=0); EMO.kind="neutral"; HEAD=null; mesh=null; pctx=null; vid=null; $("remote").style.background="";
+  if(C.face&&C.face.video) setupVideoFace(); else if(C.face) setupPhotoCanvas(); else $("faceHolder").innerHTML=faceSVG();
   setMood();
   $("callName").textContent=C.name; $("ringName").textContent=C.name; $("ringing").classList.remove("hidden");
   $("capCust").innerHTML=""; $("capYou").innerHTML=""; $("peekBody").innerHTML=$("handoff").innerHTML; $("peek").classList.add("hidden");
@@ -1738,6 +1821,7 @@ $("testBtn").onclick=()=>testFaces();
 $("playM").onclick=()=>previewVoice("m"); $("playF").onclick=()=>previewVoice("f");
 $("voiceM").onchange=()=>store("fift_vm",$("voiceM").value); $("voiceF").onchange=()=>store("fift_vf",$("voiceF").value);
 fillVoicePickers();
+$("videoIn").onchange=e=>{ const f=[...e.target.files]; if(f.length) addVideos(f); e.target.value=""; };
 $("photoIn").onchange=e=>{ const f=[...e.target.files]; if(f.length) addPhotos(f); e.target.value=""; };
 $("clearPhotos").onclick=async()=>{ await idbClear(); photoStatus(); $("photoProg").textContent="Photos cleared."; };
 $("look").value=load("fift_look","auto");
