@@ -1007,6 +1007,21 @@ function deform(){
   return d;
 }
 
+function prepPhoto(F){
+  const W=F.w,H=F.h, c=document.createElement("canvas"); c.width=W; c.height=H; const x=c.getContext("2d");
+  x.drawImage(F.img,0,0);
+  const avg=(sx,sy,sw,sh,dark)=>{ try{ const d=x.getImageData(sx,sy,sw,sh).data; let r=0,g=0,b=0,n=0; for(let i=0;i<d.length;i+=16){r+=d[i];g+=d[i+1];b+=d[i+2];n++} return `rgb(${Math.round(r/n*dark)},${Math.round(g/n*dark)},${Math.round(b/n*dark)})`; }catch(e){ return "#222"; } };
+  F.topCol=avg(0,0,W,Math.round(H*.08),.95); F.midCol=avg(0,Math.round(H*.4),Math.round(W*.08),Math.round(H*.2),.9); F.botCol=avg(0,Math.round(H*.92),W,Math.round(H*.08),.6);
+  // fade the photo's edges into the background so there's no visible box
+  x.globalCompositeOperation="destination-out";
+  const fade=(x0,y0,x1,y1,rx,ry,rw,rh)=>{ const g=x.createLinearGradient(x0,y0,x1,y1); g.addColorStop(0,"rgba(0,0,0,1)"); g.addColorStop(.35,"rgba(0,0,0,.6)"); g.addColorStop(1,"rgba(0,0,0,0)"); x.fillStyle=g; x.fillRect(rx,ry,rw,rh); };
+  const e=W*.2, eb=H*.22;
+  fade(0,0,0,e, 0,0,W,e);
+  fade(0,H,0,H-eb, 0,H-eb,W,eb);
+  fade(0,0,e,0, 0,0,e,H);
+  fade(W,0,W-e,0, W-e,0,e,H);
+  F.soft=c;
+}
 function warpTri(ctx,img,s0,s1,s2,d0,d1,d2){
   const den=s0.x*(s1.y-s2.y)+s1.x*(s2.y-s0.y)+s2.x*(s0.y-s1.y); if(Math.abs(den)<1e-6) return;
   const a=(d0.x*(s1.y-s2.y)+d1.x*(s2.y-s0.y)+d2.x*(s0.y-s1.y))/den;
@@ -1026,22 +1041,23 @@ function drawPhoto(){
   updateExpressions();
   const cw=pcv.width, ch=pcv.height, now=performance.now(), t=now/1000;
   const fx=F.box.x+F.box.w/2, fy=F.box.y+F.box.h*.55;
+  if(!F.soft) prepPhoto(F);
   if(!F.bg||F.bg.width!==cw||F.bg.height!==ch){ const bg=document.createElement("canvas"); bg.width=cw; bg.height=ch; const b=bg.getContext("2d");
-    const bs=Math.max(cw/F.w,ch/F.h)*1.1; b.filter="blur(40px) brightness(.55)"; b.drawImage(F.img,(cw-F.w*bs)/2,(ch-F.h*bs)/2,F.w*bs,F.h*bs); F.bg=bg; }
-  // face about a third of the screen height, never wider than the screen allows
-  let s=Math.min(.36*ch/F.box.h, 1.05*cw/F.w*(cw<ch?1.25:1), ch/F.h*1.06);
-  s=Math.max(s, Math.min(cw/F.w, ch/F.h)*.9);
+    const gr=b.createLinearGradient(0,0,0,ch); gr.addColorStop(0,F.topCol); gr.addColorStop(.55,F.midCol); gr.addColorStop(1,F.botCol);
+    b.fillStyle=gr; b.fillRect(0,0,cw,ch); F.bg=bg; }
+  // zoomed out: whole head and shoulders with room around it
+  let s=cw<ch ? cw/F.w*.92 : ch/F.h*.92;
   s*=1+.007*Math.sin(t*1.25);
   const hp=headPose(now);
   const dx=Math.sin(t*.41)*cw*.005+Math.sin(t*1.7)*cw*.0012+hp.dx*mesh.u*s, dy=Math.cos(t*.33)*ch*.004+hp.dy*mesh.u*s;
   const rot=Math.sin(t*.27)*.012+(speaking?Math.sin(t*2.3)*.006:0)+hp.rot;
   pctx.setTransform(1,0,0,1,0,0); pctx.drawImage(F.bg,0,0);
   pctx.translate(cw/2+dx, ch*.46+dy); pctx.rotate(rot); pctx.scale(s,s); pctx.translate(-fx,-fy);
-  pctx.drawImage(F.img,0,0);
+  pctx.drawImage(F.soft,0,0);
   // warp only the triangles that moved
   const B=mesh.base, D=deform();
   const moved=D.map((p,i)=>Math.abs(p.x-B[i].x)+Math.abs(p.y-B[i].y)>.25);
-  for(const [a,b,c] of mesh.tris){ if(moved[a]||moved[b]||moved[c]) warpTri(pctx,F.img,B[a],B[b],B[c],D[a],D[b],D[c]); }
+  for(const [a,b,c] of mesh.tris){ if(moved[a]||moved[b]||moved[c]) warpTri(pctx,F.soft,B[a],B[b],B[c],D[a],D[b],D[c]); }
   // (no painted mouth: the photo's own lips and teeth move)
   // webcam look
   pctx.setTransform(1,0,0,1,0,0);
