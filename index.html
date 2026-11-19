@@ -965,7 +965,7 @@ function updateExpressions(){
   if(speaking) EXP.browUp=Math.max(EXP.browUp,.06+.05*Math.sin(now/300));
   // blinks (a bit more often when skeptical)
   if(now>blinkAt){ blinkUntil=now+150; blinkAt=now+(2200+Math.random()*3800)*(EXP.skeptic>.4?.7:1); }
-  EXP.blink=now<blinkUntil?1-Math.abs((blinkUntil-now)/150*2-1):0;
+  EXP.blink=(C&&C.face)?0:(now<blinkUntil?1-Math.abs((blinkUntil-now)/150*2-1):0);
 }
 function headPose(now){
   let dx=0,dy=0,rot=0;
@@ -1002,7 +1002,7 @@ function deform(){
   mv(48,-.06*s,-.09*s); mv(54,.06*s,-.09*s); mv(60,-.05*s,-.07*s); mv(64,.05*s,-.07*s);
   mv(49,-.02*s,-.035*s); mv(53,.02*s,-.035*s); mv(59,-.02*s,-.025*s); mv(55,.02*s,-.025*s);
   [1,2,3].forEach(i=>mv(i,0,-.025*s)); [13,14,15].forEach(i=>mv(i,0,-.025*s));
-  [40,41,46,47].forEach(i=>mv(i,0,-.03*s));
+  // (no lower-lid lift on photos)
   // frown
   const f=E.frown;
   mv(48,0,.05*f); mv(54,0,.05*f); mv(60,0,.035*f); mv(64,0,.035*f); [56,57,58].forEach(i=>mv(i,0,-.02*f));
@@ -1015,7 +1015,7 @@ function deform(){
   mv(54,.02*k,-.035*k); mv(64,.015*k,-.025*k);
   // eyelids: widen, squint, blink (real lid closing)
   const sq=Math.min(1,E.squint+k*.4);
-  [37,38,43,44].forEach(i=>mv(i,0,-.022*b+.03*sq)); [40,41,46,47].forEach(i=>mv(i,0,-.018*sq));
+  // eyelids left untouched on photos: moving guessed eye positions looks wrong
   if(E.blink>0){ [[37,41],[38,40],[43,47],[44,46]].forEach(([up,lo])=>{ const gap=(P[lo].y-P[up].y); d[up].y+=gap*1.0*E.blink; d[lo].y-=gap*.08*E.blink; });
     [36,39,42,45].forEach(i=>mv(i,0,.006*E.blink)); }
   return d;
