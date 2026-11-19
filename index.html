@@ -46,6 +46,14 @@ h1{font-size:22px;margin:0}
 #pip{position:absolute;right:16px;top:calc(16px + env(safe-area-inset-top));width:min(26vw,220px);aspect-ratio:3/4;border-radius:14px;overflow:hidden;background:#222;box-shadow:0 6px 24px #0008;z-index:3;border:1px solid #fff2}
 #pip video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
 #caption.off{display:none}
+#call.phone #pip,#call.phone #camBtn,#call.phone #meterWrap,#call.phone #topbar{display:none!important}
+.phoneCall{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:linear-gradient(#2b3440,#11161c 70%);padding-bottom:120px}
+.phoneAv{width:150px;height:150px;border-radius:50%;background:#5a6675 center/cover no-repeat;display:flex;align-items:center;justify-content:center;font-size:56px;font-weight:600;color:#fff;position:relative}
+.phoneAv::after{content:"";position:absolute;inset:-10px;border-radius:50%;border:3px solid #30c76b;opacity:0;transform:scale(.9);transition:opacity .2s,transform .2s}
+.phoneAv.talk::after{opacity:.9;transform:scale(1);animation:ring 1s infinite}
+@keyframes ring{0%,100%{transform:scale(1)}50%{transform:scale(1.07)}}
+.phoneName{font-size:30px;font-weight:600}
+.phoneSub{color:#aab4c0;font-size:16px}
 #pip .nocam{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#aaa;font-size:13px;text-align:center;padding:10px}
 #topbar{position:absolute;left:0;right:0;top:0;padding:calc(16px + env(safe-area-inset-top)) 20px 16px;z-index:2;background:linear-gradient(#000a,#0000);display:flex;gap:10px;align-items:center}
 #topbar .nm{font-weight:700;font-size:18px}
@@ -89,7 +97,7 @@ ul.l li{margin-bottom:7px}
 <!-- ============ SETUP ============ -->
 <section id="vSetup" class="wrap">
   <h1>F&amp;I FaceTime Trainer</h1>
-  <div class="muted">Practice presenting Ford Protect, face to face. Every customer is randomly built and never repeats.</div><div class="muted" style="font-size:12px">Version 8 · talking videos</div><div class="muted" style="font-size:13px" id="metCount"></div>
+  <div class="muted">Practice presenting Ford Protect, face to face. Every customer is randomly built and never repeats.</div><div class="muted" style="font-size:12px">Version 9 · FaceTime or phone call</div><div class="muted" style="font-size:13px" id="metCount"></div>
 
   <div class="card">
     <h2>Next customer</h2>
@@ -100,6 +108,8 @@ ul.l li{margin-bottom:7px}
         <select id="brain"><option value="auto">Auto (best available)</option><option value="ai">Chrome built-in AI</option><option value="script">Scripted (works everywhere)</option></select></div>
       <div><label>Customer look</label>
         <select id="look"><option value="auto">Realistic photo (automatic)</option><option value="folder">My videos &amp; photos</option><option value="cartoon">Drawn face</option></select></div>
+      <div><label>Call type</label>
+        <select id="callType"><option value="video">📹 FaceTime (video)</option><option value="phone">📞 Phone call (voice only)</option></select></div>
       <div><label>Record my side (camera + mic)</label>
         <select id="recOpt"><option value="no">No</option><option value="yes">Yes, save video after call</option></select></div>
     </div>
@@ -178,7 +188,7 @@ ul.l li{margin-bottom:7px}
     <button class="cbtn" id="ccBtn" title="Captions on/off" style="font-size:16px;font-weight:800">CC</button>
     <button class="cbtn end" id="endBtn" title="Hang up">✆</button>
   </div>
-  <div id="ringing"><div class="big" id="ringName"></div><div class="muted">FaceTime Video…</div></div>
+  <div id="ringing"><div class="big" id="ringName"></div><div class="muted" id="ringType">FaceTime Video…</div></div>
   <div id="peek" class="hidden" style="position:absolute;left:16px;top:80px;z-index:7;width:min(460px,90vw);max-height:60vh;overflow:auto" ><div class="script" id="peekBody" style="background:#111d;"></div></div>
 </section>
 
@@ -1066,7 +1076,7 @@ function deform(){
   const B=mesh.base, d=B.map(p=>({x:p.x,y:p.y})), P=C.face.pts;
   const A=C.face.manual?.35:.55;                 // natural-looking strength
   const u=mesh.u*A;
-  const E=Object.assign({},EXP,{open:0,wide:0,round:0}); // photos: no fake mouth movement
+  const E=Object.assign({},EXP,{open:Math.min(EXP.open,.85)});
   const mv=(i,x,y)=>{d[i].x+=x*u;d[i].y+=y*u};
   const uj=mesh.u*.6, mvJ=(i,x,y)=>{d[i].x+=x*uj;d[i].y+=y*uj};
   // jaw / talking
@@ -1309,6 +1319,8 @@ function setMood(){
   $("moodTxt").textContent=m>=80?"Ready to buy":m>=65?"Warming up":m>=45?"Listening":m>=25?"Skeptical":"Shutting down";
 }
 function animFace(){
+  const pav=document.getElementById("phoneAv");
+  if(pav){ updateExpressions(); pav.classList.toggle("talk",!!speaking); const ps=$("phoneSub"); if(ps&&G.status==="live") ps.textContent=$("timer").textContent; requestAnimationFrame(animFace); return; }
   if(C&&C.face&&C.face.video&&vid){ updateExpressions(); animVideo(); requestAnimationFrame(animFace); return; }
   if(C&&C.face&&pctx&&mesh){ drawPhoto(); requestAnimationFrame(animFace); return; }
   if(C) updateExpressions();
@@ -1528,13 +1540,28 @@ async function startCall(){
   show("call");
   $("remote").classList.remove("photo");
   Object.keys(EXP).forEach(k=>EXP[k]=0); EMO.kind="neutral"; HEAD=null; mesh=null; pctx=null; vid=null; $("remote").style.background="";
-  if(C.face&&C.face.video) setupVideoFace(); else if(C.face) setupPhotoCanvas(); else $("faceHolder").innerHTML=faceSVG();
+  const phoneMode=$("callType").value==="phone";
+  $("call").classList.toggle("phone",phoneMode);
+  $("ringType").textContent=phoneMode?"calling mobile…":"FaceTime Video…";
+  if(phoneMode){
+    const pic=C.face&&C.face.img&&C.face.img.src;
+    const ini=C.name.split(" ").map(w=>w[0]).join("").slice(0,2);
+    $("faceHolder").innerHTML=`<div class="phoneCall"><div class="phoneAv" id="phoneAv" style="${pic?`background-image:url('${pic}')`:""}">${pic?"":ini}</div>
+      <div class="phoneName">${esc(C.name)}</div><div class="phoneSub" id="phoneSub">mobile</div></div>`;
+    if(pic&&C.face.box){ const b=C.face.box; $("phoneAv").style.backgroundPosition=`${((b.x+b.w/2)/C.face.w*100).toFixed(0)}% ${((b.y+b.h*.45)/C.face.h*100).toFixed(0)}%`; $("phoneAv").style.backgroundSize="170%"; }
+  }
+  else if(C.face&&C.face.video) setupVideoFace(); else if(C.face) setupPhotoCanvas(); else $("faceHolder").innerHTML=faceSVG();
   setMood();
   $("callName").textContent=C.name; $("ringName").textContent=C.name; $("ringing").classList.remove("hidden");
   $("capCust").innerHTML=""; $("capYou").innerHTML=""; $("peekBody").innerHTML=$("handoff").innerHTML; $("peek").classList.add("hidden");
   ringTone();
 
-  // camera
+  // camera (FaceTime) or audio only (phone call)
+  const isPhone=$("callType").value==="phone";
+  if(isPhone){
+    try{ if($("recOpt").value==="yes" && window.MediaRecorder){ camStream=await navigator.mediaDevices.getUserMedia({audio:true});
+      recChunks=[]; recorder=new MediaRecorder(camStream); recorder.ondataavailable=e=>e.data.size&&recChunks.push(e.data); recorder.start(1000); $("rec").classList.add("on"); } }catch(e){}
+  } else
   try{
     camStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"user"},audio:$("recOpt").value==="yes"});
     $("me").srcObject=camStream; $("nocam").classList.add("hidden");
@@ -1824,6 +1851,9 @@ fillVoicePickers();
 $("videoIn").onchange=e=>{ const f=[...e.target.files]; if(f.length) addVideos(f); e.target.value=""; };
 $("photoIn").onchange=e=>{ const f=[...e.target.files]; if(f.length) addPhotos(f); e.target.value=""; };
 $("clearPhotos").onclick=async()=>{ await idbClear(); photoStatus(); $("photoProg").textContent="Photos cleared."; };
+$("callType").value=load("fift_calltype","video");
+const callLabel=()=>{ $("callBtn").textContent=$("callType").value==="phone"?"📞 Call customer":"📹 Start FaceTime"; };
+$("callType").onchange=()=>{ store("fift_calltype",$("callType").value); callLabel(); }; callLabel();
 $("look").value=load("fift_look","auto");
 $("look").onchange=()=>{ store("fift_look",$("look").value); if($("look").value!=="cartoon") loadFaceApi().then(()=>{ if($("look").value==="auto") prefetchFaces(); }).catch(()=>{}); };
 photoStatus();
