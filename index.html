@@ -1602,8 +1602,8 @@ function fillVoicePickers(){
   const good=voices.some(v=>/premium|natural|neural|enhanced/i.test(v.name)&&/^en/i.test(v.lang));
   const tip=$("voiceTip");
   if(tip) tip.innerHTML=good?'<span class="ok">✓ Natural-sounding voices found (marked ★).</span>':
-    (IS_IOS?'<span class="wn">Only basic voices are installed. For much more natural voices (free): iPad <b>Settings › Accessibility › Spoken Content › Voices › English</b>, then download a few <b>Premium</b> or <b>Enhanced</b> voices (try Ava, Zoe, Evan, Nathan). Reload this page after.</span>':
-     '<span class="wn">Only basic voices found. In <b>Microsoft Edge</b>, the "Natural" voices sound far more human. Or on a Mac, download Premium voices in System Settings › Accessibility › Spoken Content.</span>');
+    (IS_IOS?'<span class="wn">iPhones only let web pages use basic voices. For a natural voice, choose an option under <b>Voice engine</b> below (the on-device AI voice is free and unlimited).</span>':
+     '<span class="wn">Only basic voices found. For a natural voice, choose an option under <b>Voice engine</b> below, or use Microsoft Edge on Windows.</span>');
 }
 function previewVoice(g){
   const sel=$(g==="m"?"voiceM":"voiceF"); store(g==="m"?"fift_vm":"fift_vf",sel.value);
