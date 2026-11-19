@@ -679,9 +679,18 @@ function templateFace(img){
   [[-98,0],[-62,-20],[-22,-28],[0,-24],[22,-28],[62,-20],[98,0],[62,26],[22,36],[0,37],[-22,36],[-62,26]].forEach(([x,y])=>P.push(A(512+x,719+y)));
   [[-84,0],[-26,-6],[0,-5],[26,-6],[84,0],[26,6],[0,7],[-26,6]].forEach(([x,y])=>P.push(A(512+x,719+y)));
   const cv=document.createElement("canvas"); cv.width=W; cv.height=H; const cx=cv.getContext("2d"); cx.drawImage(img,0,0);
+  // locate the darkest horizontal line between nose and chin = where the lips meet
+  try{
+    const x0=Math.round(W*.44), w=Math.round(W*.12), y0=Math.round(H*.63), y1=Math.round(H*.82);
+    const d=cx.getImageData(x0,y0,w,y1-y0).data; let best=1e9, bestY=719*H/1024; const rows=[];
+    for(let r=0;r<y1-y0;r++){ let t=0; for(let c=0;c<w;c++){const i=(r*w+c)*4; t+=.3*d[i]+.59*d[i+1]+.11*d[i+2];} rows.push(t/w); }
+    for(let r=2;r<rows.length-2;r++){ const v=(rows[r-2]+rows[r-1]+rows[r]+rows[r+1]+rows[r+2])/5; if(v<best){best=v;bestY=y0+r;} }
+    const dy=bestY-719*H/1024;
+    if(Math.abs(dy)<H*.08){ for(let i=48;i<68;i++) P[i].y+=dy; [31,32,33,34,35].forEach(i=>P[i].y+=dy*.35); [4,5,6,7,8,9,10,11,12].forEach(i=>P[i].y+=dy*.6); }
+  }catch(e){}
   let skin="rgb(200,160,130)";
   try{ const d=cx.getImageData(Math.round(330*k),Math.round(600*H/1024),10,10).data,e=cx.getImageData(Math.round(694*k),Math.round(600*H/1024),10,10).data; let r=0,g=0,b=0; for(let i=0;i<d.length;i+=4){r+=d[i]+e[i];g+=d[i+1]+e[i+1];b+=d[i+2]+e[i+2]} const n=d.length/2; skin=`rgb(${Math.round(r/n)},${Math.round(g/n)},${Math.round(b/n)})`; }catch(e){}
-  return {img,pts:P,box:{x:274*k,y:330*H/1024,w:476*k,h:560*H/1024},w:W,h:H,skin,manual:true};
+  return {img,pts:P,box:{x:274*k,y:330*H/1024,w:476*k,h:560*H/1024},w:W,h:H,skin,manual:true,tmpl:true};
 }
 
 /* ---- photo folder stored on this computer (IndexedDB) ---- */
@@ -730,7 +739,7 @@ async function addPhotos(files){
       try{
         const img=await blobToImg(f);
         const sq=Math.abs(img.naturalWidth-img.naturalHeight)/img.naturalWidth<.06 && img.naturalWidth>=400;
-        if(sq){ const t=templateFace(img); rec={pts:t.pts,box:t.box,w:t.w,h:t.h,skin:t.skin,manual:true,gender:Math.random()<.5?"m":"f",age:RI(28,62)}; manual++; }
+        if(sq){ const t=templateFace(img); rec={pts:t.pts,box:t.box,w:t.w,h:t.h,skin:t.skin,manual:true,tmpl:true,gender:Math.random()<.5?"m":"f",age:RI(28,62)}; manual++; }
         else reasons.add("not a square close-up headshot");
       }catch(e){ reasons.add("couldn't open the image ("+(f.type||"unknown type")+")"); }
     }
@@ -816,6 +825,8 @@ async function getFace(){
       for(const f of shuffle(unused)){
         try{
           if(!f._img) f._img = f.dataUrl ? await loadImg(f.dataUrl) : await blobToImg(f.blob);
+          const k=f.w/1024, isTmpl=f.tmpl || (f.pts&&f.pts[30]&&Math.abs(f.pts[30].x-512*k)<1.5&&Math.abs(f.pts[27].x-512*k)<1.5&&Math.abs(f.pts[36].x-334*k)<1.5);
+          if(isTmpl){ const t=templateFace(f._img); f.pts=t.pts; f.box=t.box; f.skin=t.skin; f.tmpl=true; }
           f.used=true; await idbPut(f); photoStatus();
           return Object.assign({},f,{img:f._img});
         }catch(e){ broken++; }
@@ -973,12 +984,13 @@ function deform(){
   const u=mesh.u*A;
   const E=Object.assign({},EXP,{open:Math.min(EXP.open,.85)});
   const mv=(i,x,y)=>{d[i].x+=x*u;d[i].y+=y*u};
+  const uj=mesh.u*.6, mvJ=(i,x,y)=>{d[i].x+=x*uj;d[i].y+=y*uj};
   // jaw / talking
-  const jaw=E.open*.09;
-  [[7,.95],[8,1],[9,.95],[6,.8],[10,.8],[5,.6],[11,.6],[4,.35],[12,.35],[3,.12],[13,.12]].forEach(([i,w])=>mv(i,0,jaw*w));
-  [55,56,57,58,59].forEach(i=>mv(i,0,jaw*.9)); [65,66,67].forEach(i=>mv(i,0,jaw*.95));
-  [49,50,51,52,53].forEach(i=>mv(i,0,-jaw*.08)); [61,62,63].forEach(i=>mv(i,0,-jaw*.12));
-  [48,54,60,64].forEach(i=>mv(i,0,jaw*.4));
+  const jaw=E.open*.17;
+  [[7,.95],[8,1],[9,.95],[6,.8],[10,.8],[5,.6],[11,.6],[4,.35],[12,.35],[3,.12],[13,.12]].forEach(([i,w])=>mvJ(i,0,jaw*w));
+  [55,56,57,58,59].forEach(i=>mvJ(i,0,jaw*.9)); [65,66,67].forEach(i=>mvJ(i,0,jaw*.95));
+  [49,50,51,52,53].forEach(i=>mvJ(i,0,-jaw*.08)); [61,62,63].forEach(i=>mvJ(i,0,-jaw*.12));
+  [48,54,60,64].forEach(i=>mvJ(i,0,jaw*.4));
   // ee / oo shapes
   const w=E.wide*.025-E.round*.04;
   mv(48,-w,0); mv(60,-w*.9,0); mv(54,w,0); mv(64,w*.9,0);
@@ -1012,6 +1024,14 @@ function prepPhoto(F){
   x.drawImage(F.img,0,0);
   const avg=(sx,sy,sw,sh,dark)=>{ try{ const d=x.getImageData(sx,sy,sw,sh).data; let r=0,g=0,b=0,n=0; for(let i=0;i<d.length;i+=16){r+=d[i];g+=d[i+1];b+=d[i+2];n++} return `rgb(${Math.round(r/n*dark)},${Math.round(g/n*dark)},${Math.round(b/n*dark)})`; }catch(e){ return "#222"; } };
   F.topCol=avg(0,0,W,Math.round(H*.08),.95); F.midCol=avg(0,Math.round(H*.4),Math.round(W*.08),Math.round(H*.2),.9); F.botCol=avg(0,Math.round(H*.92),W,Math.round(H*.08),.6);
+  // teeth already showing? (look for bright, whitish pixels between the lips)
+  try{ const P=F.pts, xs=[60,61,62,63,64,65,66,67].map(i=>P[i].x), ys=[60,61,62,63,64,65,66,67].map(i=>P[i].y);
+    const mx=Math.min(...xs), mw=Math.max(...xs)-mx, cy=(Math.min(...ys)+Math.max(...ys))/2, band=Math.max(6,mw*.12);
+    const cheek=x.getImageData(Math.round((P[2].x+P[31].x)/2),Math.round(P[30].y),8,8).data; let sk=0; for(let i=0;i<cheek.length;i+=4) sk+=.3*cheek[i]+.59*cheek[i+1]+.11*cheek[i+2]; sk/=cheek.length/4;
+    const d=x.getImageData(Math.round(mx+mw*.2),Math.round(cy-band/2),Math.max(1,Math.round(mw*.6)),Math.round(band)).data; let white=0,n=0;
+    for(let i=0;i<d.length;i+=4){ const r=d[i],g=d[i+1],b=d[i+2],L=.3*r+.59*g+.11*b,mxc=Math.max(r,g,b),mnc=Math.min(r,g,b); n++; if(L>sk*1.05&&L>110&&(mxc-mnc)/(mxc||1)<.28) white++; }
+    F.teeth = white/n > .15;
+  }catch(e){ F.teeth=false; }
   // fade the photo's edges into the background so there's no visible box
   x.globalCompositeOperation="destination-out";
   const fade=(x0,y0,x1,y1,rx,ry,rw,rh)=>{ const g=x.createLinearGradient(x0,y0,x1,y1); g.addColorStop(0,"rgba(0,0,0,1)"); g.addColorStop(.35,"rgba(0,0,0,.6)"); g.addColorStop(1,"rgba(0,0,0,0)"); x.fillStyle=g; x.fillRect(rx,ry,rw,rh); };
@@ -1058,7 +1078,17 @@ function drawPhoto(){
   const B=mesh.base, D=deform();
   const moved=D.map((p,i)=>Math.abs(p.x-B[i].x)+Math.abs(p.y-B[i].y)>.25);
   for(const [a,b,c] of mesh.tris){ if(moved[a]||moved[b]||moved[c]) warpTri(pctx,F.soft,B[a],B[b],B[c],D[a],D[b],D[c]); }
-  // (no painted mouth: the photo's own lips and teeth move)
+  // lips part: soft shadow only between the real lips (skipped when the photo already shows teeth)
+  const gap=Math.hypot(D[66].x-D[62].x,D[66].y-D[62].y);
+  if(!F.teeth && gap>1.2){
+    pctx.save(); pctx.beginPath(); [60,61,62,63,64,65,66,67].forEach((i,k)=>k?pctx.lineTo(D[i].x,D[i].y):pctx.moveTo(D[i].x,D[i].y)); pctx.closePath(); pctx.clip();
+    const cx=(D[60].x+D[64].x)/2, cy=(D[62].y+D[66].y)/2, mw=Math.hypot(D[64].x-D[60].x,D[64].y-D[60].y);
+    pctx.translate(cx,cy); pctx.scale(1,Math.max(.15,gap/(mw*.9)));
+    const rg=pctx.createRadialGradient(0,0,0,0,0,mw*.5);
+    rg.addColorStop(0,"rgba(30,8,10,.88)"); rg.addColorStop(.6,"rgba(45,14,16,.7)"); rg.addColorStop(1,"rgba(80,30,30,0)");
+    pctx.fillStyle=rg; pctx.fillRect(-mw,-mw,mw*2,mw*2);
+    pctx.restore();
+  }
   // webcam look
   pctx.setTransform(1,0,0,1,0,0);
   const vg=pctx.createRadialGradient(cw/2,ch*.45,Math.min(cw,ch)*.35,cw/2,ch*.5,Math.max(cw,ch)*.8);
